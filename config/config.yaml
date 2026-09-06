@@ -1,0 +1,58 @@
+# ==============================================================================
+# SmartGC System Configuration
+# ==============================================================================
+
+# Global seed for reproducible runs (simulator workloads & ML splitting/training)
+random_seed: 42
+
+# ------------------------------------------------------------------------------
+# Simulator Geometry & Baseline Parameters (Phase 1+)
+# ------------------------------------------------------------------------------
+simulator:
+  # Size of each individual block in bytes (default: 4096 bytes / 4KB)
+  block_size_bytes: 4096
+
+  # Number of blocks contained within a single segment (e.g., 64 blocks = 256KB segment)
+  blocks_per_segment: 64
+
+  # Total number of physical segments available in the storage pool
+  total_segments: 32
+
+  # GC trigger threshold (low watermark):
+  # Trigger GC when free segments count <= gc_free_segments_threshold
+  gc_free_segments_threshold: 2
+
+  # Garbage Collection victim selection policy:
+  # Options: GREEDY (minimum valid blocks)
+  gc_policy: "GREEDY"
+
+  # Placement policy for incoming writes:
+  # Options: MIXED (baseline), RULE_BASED (heuristic), LSTM_SMARTGC (predicted)
+  placement_policy: "MIXED"
+
+# ------------------------------------------------------------------------------
+# Synthetic Workload Generator Settings (Phase 1 Validation)
+# ------------------------------------------------------------------------------
+synthetic_workload:
+  total_requests: 5000
+  lba_range_min: 0
+  lba_range_max: 500
+  hot_ratio: 0.20          # 20% of LBAs are hot
+  hot_traffic_ratio: 0.80  # Hot LBAs receive 80% of write traffic (Zipf/Pareto principle)
+
+# ------------------------------------------------------------------------------
+# ML Subsystem & LSTM Hyperparameters (Phase 2 - Phase 4 Placeholders)
+# ------------------------------------------------------------------------------
+ml:
+  sequence_length: 10      # Number of past rewrite intervals in input window
+  hidden_dim: 64           # LSTM hidden state dimension
+  num_layers: 2            # Number of stacked LSTM layers
+  dropout: 0.1             # Dropout probability
+  batch_size: 64           # Mini-batch training size
+  learning_rate: 0.001     # Adam optimizer learning rate
+  epochs: 25               # Training epochs
+  loss_function: "SmoothL1" # MAE / SmoothL1
+  train_split: 0.70        # Train dataset fraction (chronological)
+  val_split: 0.15          # Validation dataset fraction (chronological)
+  test_split: 0.15         # Test dataset fraction (chronological)
+  hot_percentile_cutoff: 30 # LBAs with predicted interval <= 30th percentile labeled HOT

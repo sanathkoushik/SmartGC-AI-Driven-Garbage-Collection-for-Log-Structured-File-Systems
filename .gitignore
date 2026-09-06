@@ -1,0 +1,46 @@
+# Build directories
+build/
+bin/
+*.obj
+*.o
+*.exe
+*.out
+*.app
+*.dSYM/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Python / ML artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+*.pt
+*.pth
+*.pkl
+
+# Raw and generated large datasets
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/predictions/*
+!data/predictions/.gitkeep
+
+# Results & logs
+results/metrics/*
+!results/metrics/.gitkeep
+results/plots/*
+!results/plots/.gitkeep
+*.log
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
