@@ -26,8 +26,11 @@ simulator:
   # Options: GREEDY (minimum valid blocks)
   gc_policy: "GREEDY"
 
-  # Placement policy for incoming writes:
-  # Options: MIXED (baseline), RULE_BASED (heuristic), LSTM_SMARTGC (predicted)
+  # Placement policy for incoming writes. The Phase 4a baseline ladder:
+  #   MIXED (baseline) -> RULE_BASED (zero-training threshold) ->
+  #   SUP_LIKE (SUP-GC: default-hot-on-write, cold-on-GC-copy) ->
+  #   STAT_ML (lightweight sklearn) -> LSTM_SMARTGC (vanilla LSTM) ->
+  #   LSTM_ATTN_SMARTGC (LSTM + additive attention, multi-stream)
   placement_policy: "MIXED"
 
 # ------------------------------------------------------------------------------
@@ -55,4 +58,43 @@ ml:
   train_split: 0.70        # Train dataset fraction (chronological)
   val_split: 0.15          # Validation dataset fraction (chronological)
   test_split: 0.15         # Test dataset fraction (chronological)
-  hot_percentile_cutoff: 30 # LBAs with predicted interval <= 30th percentile labeled HOT
+  hot_percentile_cutoff: 30 # Phase 4b: initial/seed cutoff; superseded at runtime
+                            # by the rolling percentile over hot_cutoff_window_events
+
+  # ---- STAT_ML (Phase 4a rung 4) lightweight sklearn regressor ----
+  stat_ml_max_iter: 200
+  stat_ml_learning_rate: 0.08
+  stat_ml_max_depth: 6
+
+  # ---- Phase 4b: dynamic thresholding, drift, confidence gate ----
+  hot_cutoff_window_events: 2000      # rolling percentile window
+  drift_kl_threshold: 0.15            # drift flag trigger (KL between consecutive windows)
+  confidence_fallback_threshold: 0.55 # below this -> fall back to RULE_BASED for that block
+  drift_window_events: 2000           # window size for the drift detector
+  confidence_ensemble_size: 3         # lightweight models for predictive-variance confidence
+
+  # ---- Phase 4a rung 6: attention ----
+  attention:
+    enabled: true
+    num_heads: 2                      # small - lightweight per-block model, not an LLM
+
+# ------------------------------------------------------------------------------
+# GC-time learned component (Phase 5)
+# ------------------------------------------------------------------------------
+gc:
+  learned_trigger: false              # ablation switch
+  trigger_state_window_events: 500
+  migration_stream_count: 3           # SHORT / MEDIUM / LONG destination classes
+  controller_algorithm: "q_learning"  # q_learning | contextual_bandit
+  controller_episodes: 40
+  controller_epsilon: 0.15
+  controller_alpha: 0.30
+  controller_gamma: 0.90
+
+# ------------------------------------------------------------------------------
+# Evaluation & cost accounting (Phase 6 & 7)
+# ------------------------------------------------------------------------------
+evaluation:
+  op_ratio_sweep: [0.10, 0.20, 0.30]      # live-set / capacity ratios for the OP sweep
+  real_trace_name: "msr_cambridge_src1"   # set once the Phase 2 real trace is chosen
+  drift_scenario_name: "synthetic_drift"  # concatenated two-phase synthetic workload

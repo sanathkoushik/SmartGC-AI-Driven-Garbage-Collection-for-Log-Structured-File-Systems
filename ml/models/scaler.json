@@ -1,0 +1,27 @@
+{
+  "contract_version": 2,
+  "features": [
+    "time_since_last_write",
+    "rolling_mean_interval",
+    "rolling_std_interval",
+    "write_count_so_far",
+    "request_size"
+  ],
+  "feature_mean": [
+    123.95805861584925,
+    97.89766306993506,
+    99.33521198604147,
+    12.545365604662045,
+    1.0
+  ],
+  "feature_std": [
+    164.90831390442926,
+    61.473147957577154,
+    77.45983137644488,
+    8.031052466332465,
+    1.0
+  ],
+  "target_transform": "log1p",
+  "target_mean": 4.485957459010325,
+  "target_std": 1.3505421282117909
+}
