@@ -1,0 +1,7 @@
+# SmartGC ML subsystem (Phases 2-7). Python 3.11+.
+numpy>=1.26
+pandas>=2.0
+PyYAML>=6.0
+scikit-learn>=1.4
+torch>=2.2          # CPU build is sufficient
+matplotlib>=3.8
