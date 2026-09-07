@@ -4,10 +4,24 @@
 #include "segment.hpp"
 #include "mapping.hpp"
 #include "metrics.hpp"
+#include "predictions.hpp"
+#include "gc_trigger.hpp"
 #include "lfs_simulator.hpp"
 #include "synthetic_workload.hpp"
 
+#include <cstdio>
+#include <fstream>
+#include <string>
+
 using namespace smartgc;
+
+// Small helper: write a throwaway CSV file and return its path.
+static std::string write_temp_csv(const std::string& name, const std::string& body) {
+    std::ofstream out(name);
+    out << body;
+    out.close();
+    return name;
+}
 
 // -----------------------------------------------------------------------------
 // Test 1: Block State Transitions
@@ -321,6 +335,200 @@ TEST_CASE(test_hand_computed_waf) {
     ASSERT_TRUE(sim.read(7)); // Migrated LBA 7 must still be valid and mapped!
     ASSERT_TRUE(sim.read(8));
     ASSERT_TRUE(sim.read(9));
+}
+
+// -----------------------------------------------------------------------------
+// Test 6: Placement-policy enum round-trip and stream-count derivation
+// -----------------------------------------------------------------------------
+TEST_CASE(test_placement_policy_and_streams) {
+    const PlacementPolicy all[] = {
+        PlacementPolicy::MIXED, PlacementPolicy::RULE_BASED, PlacementPolicy::LSTM_SMARTGC,
+        PlacementPolicy::SUP_LIKE, PlacementPolicy::STAT_ML, PlacementPolicy::LSTM_ATTN_SMARTGC
+    };
+    for (PlacementPolicy p : all) {
+        ASSERT_TRUE(placement_policy_from_string(placement_policy_to_string(p)) == p);
+    }
+    ASSERT_TRUE(placement_policy_from_string("SUP_LIKE") == PlacementPolicy::SUP_LIKE);
+    ASSERT_TRUE(placement_policy_from_string("LSTM_ATTN_SMARTGC") == PlacementPolicy::LSTM_ATTN_SMARTGC);
+
+    ASSERT_TRUE(stream_from_binary_class(1) == StreamClass::SHORT);
+    ASSERT_TRUE(stream_from_binary_class(0) == StreamClass::LONG);
+    ASSERT_TRUE(stream_from_bucket(5, 3) == StreamClass::LONG);   // clamped
+    ASSERT_TRUE(stream_from_bucket(1, 3) == StreamClass::MEDIUM);
+    ASSERT_TRUE(stream_from_bucket(1, 2) == StreamClass::MEDIUM); // bucket kept, count only clamps overflow
+
+    SimulatorConfig c;
+    c.placement_policy = PlacementPolicy::MIXED;
+    ASSERT_EQ(c.effective_stream_count(), 1);
+    c.placement_policy = PlacementPolicy::RULE_BASED;
+    ASSERT_EQ(c.effective_stream_count(), 2);
+    c.placement_policy = PlacementPolicy::SUP_LIKE;
+    ASSERT_EQ(c.effective_stream_count(), 2);
+    c.placement_policy = PlacementPolicy::LSTM_ATTN_SMARTGC;
+    c.migration_stream_count = 3;
+    ASSERT_EQ(c.effective_stream_count(), 3);
+    c.migration_stream_count = 9; // clamped to MAX_STREAM_CLASSES
+    ASSERT_EQ(c.effective_stream_count(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// Test 7: SUP_LIKE places fresh writes hot, routes GC survivors to the cold stream
+// -----------------------------------------------------------------------------
+TEST_CASE(test_sup_like_multistream_migration) {
+    SimulatorConfig config;
+    config.total_segments = 6;
+    config.blocks_per_segment = 4;
+    config.block_size_bytes = 4096;
+    config.gc_free_segments_threshold = 1;
+    config.placement_policy = PlacementPolicy::SUP_LIKE;
+
+    LfsSimulator sim(config);
+    ASSERT_EQ(sim.stream_count(), 2);
+
+    // Fill segment 0 (SHORT head) with LBAs 0..3.
+    for (int i = 0; i < 4; ++i) sim.write(i);
+    const size_t short_head_after_seg0 = sim.stream_head_id(0);
+    ASSERT_EQ(short_head_after_seg0, 0);
+
+    // A fresh write rolls the SHORT head onto the next free segment (still hot).
+    sim.write(10);
+    ASSERT_EQ(sim.stream_head_id(0), 1);
+
+    // Overwrite LBAs 0,1,2 (fresh writes -> SHORT head). LBA 3 is never rewritten.
+    sim.write(0);
+    sim.write(1);
+    sim.write(2);
+
+    // Segment 0 now holds exactly one valid block (LBA 3) plus three invalid.
+    ASSERT_EQ(sim.segments()[0].valid_count(), 1);
+    ASSERT_EQ(sim.segments()[0].invalid_count(), 3);
+
+    ASSERT_TRUE(sim.run_greedy_gc());
+
+    // Exactly one valid block migrated, and SUP_LIKE routed it to the LONG (cold)
+    // stream head, which is a different segment from the SHORT head.
+    ASSERT_EQ(sim.metrics().valid_blocks_migrated, 1);
+    ASSERT_EQ(sim.metrics().gc_count, 1);
+    ASSERT_EQ(sim.metrics().per_gc_migrated.size(), 1);
+    ASSERT_EQ(sim.metrics().per_gc_migrated[0], 1);
+
+    PhysicalAddress a;
+    ASSERT_TRUE(sim.mapping().get(3, a));
+    ASSERT_EQ(a.segment_id, sim.stream_head_id(1)); // in the LONG stream head
+    ASSERT_NE(sim.stream_head_id(1), sim.stream_head_id(0));
+    ASSERT_TRUE(sim.read(3));
+
+    // Segment 0 reclaimed.
+    ASSERT_EQ(sim.segments()[0].valid_count(), 0);
+    ASSERT_EQ(sim.segments()[0].free_count(), 4);
+
+    // Global invariant: mapped LBAs == total valid blocks.
+    ASSERT_EQ(sim.count_total_valid_blocks(), sim.mapping().size());
+}
+
+// -----------------------------------------------------------------------------
+// Test 8: PredictionTable CSV parsing (v2 and v1 fallback)
+// -----------------------------------------------------------------------------
+TEST_CASE(test_prediction_table_parsing) {
+    const std::string p2 = write_temp_csv("pred_v2_tmp.csv",
+        "timestamp,lba,predicted_rewrite_interval,predicted_class,predicted_stream_class,confidence\n"
+        "1,100,5.0,HOT,0,0.90\n"
+        "2,101,50.0,COLD,2,0.90\n"
+        "3,102,20.0,HOT,1,0.30\n");
+    PredictionTable t;
+    t.load(p2);
+    ASSERT_EQ(t.size(), 3);
+    ASSERT_EQ(t.row(0).lba, 100);
+    ASSERT_EQ(t.row(0).predicted_class, 1);
+    ASSERT_TRUE(t.row(0).stream(3) == StreamClass::SHORT);
+    ASSERT_EQ(t.row(1).predicted_class, 0);
+    ASSERT_TRUE(t.row(1).stream(3) == StreamClass::LONG);
+    ASSERT_EQ(t.row(2).predicted_stream_class, 1);
+    ASSERT_TRUE(t.row(2).stream(3) == StreamClass::MEDIUM);
+    ASSERT_NEAR(t.row(2).confidence, 0.30, 1e-9);
+    std::remove(p2.c_str());
+
+    const std::string p1 = write_temp_csv("pred_v1_tmp.csv",
+        "timestamp,lba,predicted_rewrite_interval,predicted_class\n"
+        "1,7,3.0,1\n"
+        "2,8,99.0,0\n");
+    PredictionTable t1;
+    t1.load(p1);
+    ASSERT_EQ(t1.size(), 2);
+    ASSERT_EQ(t1.row(0).predicted_stream_class, -1);       // absent
+    ASSERT_TRUE(t1.row(0).stream(2) == StreamClass::SHORT); // derived from class
+    ASSERT_TRUE(t1.row(1).stream(2) == StreamClass::LONG);
+    ASSERT_NEAR(t1.row(0).confidence, 1.0, 1e-9);           // defaulted
+    std::remove(p1.c_str());
+}
+
+// -----------------------------------------------------------------------------
+// Test 9: GC trigger controller - fixed watermark vs learned/adaptive fallback
+// -----------------------------------------------------------------------------
+TEST_CASE(test_gc_trigger_controller) {
+    GcTriggerController fixed;
+    fixed.configure(false, 2, 32, "");
+    GcTriggerState st; // defaults
+    ASSERT_TRUE(fixed.should_trigger(2, st));
+    ASSERT_TRUE(fixed.should_trigger(1, st));
+    ASSERT_FALSE(fixed.should_trigger(3, st));
+    ASSERT_FALSE(fixed.learned());
+
+    GcTriggerController learned;
+    learned.configure(true, 2, 32, "");
+    ASSERT_TRUE(learned.learned());
+
+    // Pool floor: always trigger at <= 1 free segment.
+    GcTriggerState any;
+    ASSERT_TRUE(learned.should_trigger(1, any));
+
+    // Write burst -> raise the effective watermark, trigger earlier.
+    GcTriggerState burst;
+    burst.free_segment_ratio = 0.125;
+    burst.recent_write_rate = 0.9;
+    burst.recent_waf = 1.2;
+    ASSERT_TRUE(learned.should_trigger(4, burst)); // effective 2 +2 +1 = 5 >= 4
+
+    // Calm system -> relax the watermark, hold off.
+    GcTriggerState calm;
+    calm.free_segment_ratio = 0.5;
+    calm.recent_write_rate = 0.05;
+    calm.recent_waf = 1.01;
+    ASSERT_FALSE(learned.should_trigger(3, calm)); // effective 2 -1 = 1 < 3
+}
+
+// -----------------------------------------------------------------------------
+// Test 10: multi-stream end-to-end run preserves data + accounting invariants
+// -----------------------------------------------------------------------------
+TEST_CASE(test_multistream_end_to_end_invariants) {
+    SimulatorConfig config;
+    config.total_segments = 24;
+    config.blocks_per_segment = 16;      // 384-block pool
+    config.block_size_bytes = 4096;
+    config.gc_free_segments_threshold = 3;
+    config.placement_policy = PlacementPolicy::SUP_LIKE;
+
+    LfsSimulator sim(config);
+    // 150-LBA working set fits comfortably (~2.5x over-provisioned).
+    auto reqs = SyntheticWorkloadGenerator::generate_skewed(2000, 150, 0.20, 0.80, 42, 4096);
+    for (const auto& r : reqs) sim.write(r.lba, r.size_bytes);
+
+    const auto& m = sim.metrics();
+    ASSERT_EQ(m.total_write_requests, 2000);
+    ASSERT_EQ(m.logical_bytes_written, static_cast<uint64_t>(2000) * 4096);
+    ASSERT_TRUE(m.waf() >= 1.0);
+    ASSERT_EQ(m.physical_bytes_written, m.logical_bytes_written + m.gc_bytes_copied);
+    ASSERT_EQ(m.gc_bytes_copied, m.valid_blocks_migrated * 4096);
+    ASSERT_EQ(m.per_gc_migrated.size(), m.gc_count);
+    ASSERT_EQ(sim.stream_count(), 2);
+
+    // Data-integrity invariant: every mapped LBA is valid exactly once.
+    ASSERT_EQ(sim.count_total_valid_blocks(), sim.mapping().size());
+
+    // Determinism: an identical replay yields identical WAF.
+    LfsSimulator sim2(config);
+    for (const auto& r : reqs) sim2.write(r.lba, r.size_bytes);
+    ASSERT_NEAR(sim2.metrics().waf(), m.waf(), 1e-12);
 }
 
 int main() {
