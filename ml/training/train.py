@@ -43,7 +43,10 @@ def main() -> None:
     ap.add_argument("--model", required=True, choices=sorted(REGISTRY))
     ap.add_argument("--scaler", default=repo_path("ml", "models", "scaler.json"))
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--epochs", type=int, default=None, help="override ml.epochs")
     args = ap.parse_args()
+    if args.epochs is not None:
+        cfg = {**cfg, "ml": {**cfg.get("ml", {}), "epochs": int(args.epochs)}}
 
     ds_path = _resolve_dataset(args.dataset)
     ds_name = os.path.splitext(os.path.basename(ds_path))[0].replace("sequences_", "")

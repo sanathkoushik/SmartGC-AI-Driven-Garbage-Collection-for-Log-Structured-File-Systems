@@ -126,6 +126,7 @@ int main(int argc, char* argv[]) {
     std::string workload_name;
     std::string run_id;
     bool quiet = false;
+    bool generate_only = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -155,6 +156,7 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--export-metrics") { export_metrics_file = next();
         } else if (arg == "--export-trace") { export_trace_file = next();
         } else if (arg == "--quiet") { quiet = true;
+        } else if (arg == "--generate-only") { generate_only = true;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             print_help(argv[0]);
@@ -210,6 +212,10 @@ int main(int argc, char* argv[]) {
         if (!export_trace_file.empty()) {
             std::cout << "Exporting normalized trace to: " << export_trace_file << "\n";
             SyntheticWorkloadGenerator::export_to_csv(requests, export_trace_file);
+        }
+        if (generate_only) {
+            std::cout << "--generate-only: wrote " << requests.size() << " requests, skipping simulation.\n";
+            return 0;
         }
         for (const auto& r : requests) {
             write_lbas.push_back(r.lba);
