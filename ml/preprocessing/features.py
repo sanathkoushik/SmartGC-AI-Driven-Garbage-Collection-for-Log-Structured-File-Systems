@@ -112,6 +112,35 @@ def build_sequences(feat: pd.DataFrame, seq_len: int):
     return X, y, meta
 
 
+def build_inference_sequences(feat: pd.DataFrame, seq_len: int):
+    """One left-padded window per *write event* (in chronological order), with no
+    supervised target - used by ml/inference/export.py so predictions.csv has
+    exactly one row per write event, in lockstep with the simulator's replay."""
+    fvals = feat[FEATURES].to_numpy(np.float64)
+    lba = feat["lba"].to_numpy(np.int64)
+    widx = feat["widx"].to_numpy(np.int64)
+    ts = feat["timestamp"].to_numpy(np.int64)
+
+    order_by_lba: dict[int, list[int]] = {}
+    for i, l in enumerate(lba):
+        order_by_lba.setdefault(int(l), []).append(i)
+    pos_in_lba = np.zeros(len(lba), dtype=np.int64)
+    for rows in order_by_lba.values():
+        for p, gi in enumerate(rows):
+            pos_in_lba[gi] = p
+
+    F = len(FEATURES)
+    X = np.zeros((len(lba), seq_len, F), dtype=np.float64)
+    has_history = np.zeros(len(lba), dtype=bool)
+    for l, rows in order_by_lba.items():
+        for p, gi in enumerate(rows):
+            hist = rows[max(0, p - seq_len + 1): p + 1]
+            X[gi, seq_len - len(hist):] = fvals[hist]
+            has_history[gi] = p >= 1
+    meta = np.stack([lba, widx, ts], axis=1).astype(np.int64)
+    return X, meta, has_history
+
+
 def chronological_split(n: int, tr: float, va: float):
     i_tr = int(round(tr * n))
     i_va = int(round((tr + va) * n))
