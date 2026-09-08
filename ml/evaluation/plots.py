@@ -142,19 +142,61 @@ def plot_accuracy_vs_cost(cost_csv: str) -> None:
     if not os.path.exists(cost_csv):
         return
     df = pd.read_csv(cost_csv)
-    if df.empty or df["waf_synthetic_zipf"].isna().all():
+    col = "waf" if "waf" in df.columns else "waf_synthetic_zipf"
+    df = df[df.get("dataset", "synthetic_zipf") == "synthetic_zipf"] if "dataset" in df.columns else df
+    if df.empty or df[col].isna().all():
         return
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for _, r in df.iterrows():
         c = COLORS.get(r["model"], INK)
-        ax.scatter(r["param_count"], r["waf_synthetic_zipf"], s=110, color=c, zorder=3)
+        ax.scatter(r["param_count"], r[col], s=110, color=c, zorder=3)
         ax.annotate(f"  {r['model']}\n  {r['latency_ms_per_batch']:.2f} ms/batch",
-                    (r["param_count"], r["waf_synthetic_zipf"]), fontsize=8, color=INK, va="center")
+                    (r["param_count"], r[col]), fontsize=8, color=INK, va="center")
     ax.set_xscale("log")
     _style(ax, "Accuracy vs cost: WAF against parameter count\n(synthetic Zipf, fixed trigger)",
            "parameter count (log scale)", "WAF")
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "accuracy_vs_cost.png"), dpi=150)
+    plt.close(fig)
+
+
+def plot_real_ladder(matrix_csv: str) -> None:
+    """Before/after on real data: WAF for the ladder baselines vs the multi-stream
+    ML policy on the UMass SPC Financial1 trace at a stressed (~1.5x) OP point,
+    with the synthetic-Zipf equivalents alongside for context."""
+    df = pd.read_csv(matrix_csv)
+    df = df[df["learned_trigger_enabled"] == 0]
+    real_pols = ["MIXED", "RULE_BASED", "LSTM_ATTN_SMARTGC"]
+    real_key = next((k for k in ("financial1_op1.5", "financial1") if k in set(df["workload_name"])), None)
+    if real_key is None:
+        return
+    groups = [("synthetic_zipf", "synthetic Zipf"), (real_key, "real (SPC Financial1)")]
+    fig, ax = plt.subplots(figsize=(8, 4.4))
+    x = np.arange(len(groups))
+    w = 0.26
+    ymax = 1.0
+    for k, pol in enumerate(real_pols):
+        vals = []
+        for wl, _ in groups:
+            sub = df[(df["workload_name"] == wl) & (df["placement_policy"] == pol)]
+            v = float(sub["waf"].iloc[0]) if len(sub) else np.nan
+            vals.append(v)
+            if np.isfinite(v):
+                ymax = max(ymax, v)
+        bars = ax.bar(x + (k - 1) * w, vals, width=w, color=COLORS[pol], zorder=3, label=pol)
+        for b, v in zip(bars, vals):
+            if np.isfinite(v):
+                ax.text(b.get_x() + b.get_width() / 2, v, f"{v:.3f}", ha="center", va="bottom",
+                        fontsize=8, color=INK)
+    ax.axhline(1.0, color=MUTED, linewidth=1, linestyle="--", zorder=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels([lbl for _, lbl in groups])
+    ax.set_ylim(0.99, ymax * 1.03)
+    _style(ax, "Before / after on real data: WAF, ladder baselines vs multi-stream ML\n"
+               "(fixed GC trigger; real trace at ~1.5x over-provisioning)", "", "WAF")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "real_ladder_waf.png"), dpi=150)
     plt.close(fig)
 
 
@@ -165,6 +207,7 @@ def main() -> None:
     ap.add_argument("--op-sweep", default=repo_path("results", "metrics", "op_sweep.csv"))
     ap.add_argument("--cost", default=repo_path("results", "metrics", "model_cost.csv"))
     ap.add_argument("--drift-name", default=str(get(cfg, "evaluation.drift_scenario_name", "synthetic_drift")))
+    ap.add_argument("--real-name", default=str(get(cfg, "evaluation.real_trace_name", "financial1")))
     args = ap.parse_args()
 
     os.makedirs(PLOTS, exist_ok=True)
@@ -173,6 +216,7 @@ def main() -> None:
     if os.path.exists(args.matrix):
         plot_ladder_waf(args.matrix); made.append("ladder_waf.png")
         plot_gc_tail(args.matrix); made.append("gc_migration_tail.png")
+        plot_real_ladder(args.matrix); made.append("real_ladder_waf.png")
     plot_waf_vs_op(args.op_sweep); made.append("waf_vs_op.png")
     plot_accuracy_vs_cost(args.cost); made.append("accuracy_vs_cost.png")
     for cand in (drift_json,

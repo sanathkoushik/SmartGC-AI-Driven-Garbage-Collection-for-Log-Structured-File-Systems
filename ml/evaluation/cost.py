@@ -31,55 +31,64 @@ def _artifact_bytes(d: str) -> int:
     return total
 
 
-def _waf_lookup(matrix_csv: str) -> dict:
+def _waf_lookup(matrix_csv: str, workload: str) -> dict:
     if not os.path.exists(matrix_csv):
         return {}
     df = pd.read_csv(matrix_csv)
-    df = df[(df["workload_name"] == "synthetic_zipf") & (df["learned_trigger_enabled"] == 0)]
+    df = df[(df["workload_name"] == workload) & (df["learned_trigger_enabled"] == 0)]
     return dict(zip(df["placement_policy"], df["waf"]))
 
 
-def main() -> None:
-    cfg = load_config()
-    ap = argparse.ArgumentParser(description="SmartGC Phase 7 model cost report")
-    ap.add_argument("--dataset", default="synthetic_zipf")
-    ap.add_argument("--batch-size", type=int, default=int(get(cfg, "ml.batch_size", 64)))
-    ap.add_argument("--out", default=repo_path("results", "metrics", "model_cost.csv"))
-    args = ap.parse_args()
-
-    scaler = json.load(open(repo_path("ml", "models", "scaler.json"), encoding="utf-8"))
-    npz = np.load(repo_path("data", "processed", f"sequences_{args.dataset}.npz"), allow_pickle=True)
-    Xte = npz["X_test"]
-    waf = _waf_lookup(repo_path("results", "metrics", "matrix_results.csv"))
+def _cost_rows(dataset: str, cfg: dict, scaler: dict, batch_size: int) -> list[dict]:
+    npz_path = repo_path("data", "processed", f"sequences_{dataset}.npz")
+    if not os.path.exists(npz_path):
+        print(f"[cost] skip dataset {dataset}: {npz_path} missing")
+        return []
+    Xte = np.load(npz_path, allow_pickle=True)["X_test"]
+    waf = _waf_lookup(repo_path("results", "metrics", "matrix_results.csv"), dataset)
 
     rows = []
     for name in LEARNERS:
-        mdir = repo_path("ml", "models", f"{name}_{args.dataset}")
+        mdir = repo_path("ml", "models", f"{name}_{dataset}")
         if not os.path.isdir(mdir):
-            print(f"[cost] skip {name}: no trained artefact at {mdir}")
+            print(f"[cost] skip {name}/{dataset}: no trained artefact")
             continue
         model = build(name, scaler, cfg).load(mdir)
-
         model.predict_interval(Xte[: min(len(Xte), 128)])  # warm up
         tracemalloc.start()
-        lat = model.measure_latency(Xte, batch_size=args.batch_size, repeats=5)
+        lat = model.measure_latency(Xte, batch_size=batch_size, repeats=5)
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
-
         rows.append({
             "model": name,
-            "dataset": args.dataset,
+            "dataset": dataset,
             "param_count": model.param_count(),
             "latency_ms_per_batch": round(lat["latency_ms_per_batch"], 4),
             "throughput_pred_per_s": round(lat["throughput_pred_per_s"], 1),
             "peak_infer_mem_mb": round(peak / 1024 / 1024, 3),
             "artifact_bytes": _artifact_bytes(mdir),
-            "waf_synthetic_zipf": round(float(waf.get(name, float("nan"))), 6),
+            "waf": round(float(waf.get(name, float("nan"))), 6),
         })
-        print(f"[cost] {name}: params={rows[-1]['param_count']:,}  "
+        print(f"[cost] {name}/{dataset}: params={rows[-1]['param_count']:,}  "
               f"{rows[-1]['latency_ms_per_batch']} ms/batch  "
-              f"{rows[-1]['throughput_pred_per_s']:,} pred/s  "
-              f"WAF={rows[-1]['waf_synthetic_zipf']}")
+              f"{rows[-1]['throughput_pred_per_s']:,} pred/s  WAF={rows[-1]['waf']}")
+    return rows
+
+
+def main() -> None:
+    cfg = load_config()
+    real = str(get(cfg, "evaluation.real_trace_name", "financial1"))
+    ap = argparse.ArgumentParser(description="SmartGC Phase 7 model cost report")
+    ap.add_argument("--datasets", default=f"synthetic_zipf,{real}",
+                    help="comma-separated dataset names")
+    ap.add_argument("--batch-size", type=int, default=int(get(cfg, "ml.batch_size", 64)))
+    ap.add_argument("--out", default=repo_path("results", "metrics", "model_cost.csv"))
+    args = ap.parse_args()
+
+    scaler = json.load(open(repo_path("ml", "models", "scaler.json"), encoding="utf-8"))
+    rows = []
+    for ds in [d.strip() for d in args.datasets.split(",") if d.strip()]:
+        rows += _cost_rows(ds, cfg, scaler, args.batch_size)
 
     if not rows:
         raise SystemExit("[cost] no trained models found - run ml.training.train first")

@@ -230,6 +230,10 @@ def matrix_cells(traces: dict, cfg: dict) -> list[dict]:
     drift = str(get(cfg, "evaluation.drift_scenario_name", "synthetic_drift"))
     cells = [{"policy": p, "trace": "synthetic_zipf", "learned": False} for p in LADDER]
     cells.append({"policy": BEST, "trace": "synthetic_zipf", "learned": True})
+    # real trace: run the ladder baselines (MIXED / RULE_BASED) too, so the
+    # before/after on real data is apples-to-apples with the same geometry.
+    for p in ("MIXED", "RULE_BASED"):
+        cells.append({"policy": p, "trace": real, "learned": False})
     for t in (real, drift):
         cells.append({"policy": BEST, "trace": t, "learned": False})
         cells.append({"policy": BEST, "trace": t, "learned": True})
