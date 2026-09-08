@@ -202,6 +202,8 @@ def main() -> None:
     ap.add_argument("--total-segments", type=int, default=int(get(cfg, "simulator.total_segments", 32)))
     ap.add_argument("--blocks-per-segment", type=int, default=int(get(cfg, "simulator.blocks_per_segment", 64)))
     ap.add_argument("--episodes", type=int, default=int(get(cfg, "gc.controller_episodes", 40)))
+    ap.add_argument("--max-events", type=int, default=None,
+                    help="train the controller on the first N write events only")
     args = ap.parse_args()
 
     rng = np.random.default_rng(cfg_seed(cfg))
@@ -211,6 +213,8 @@ def main() -> None:
     df = pd.read_csv(args.trace)
     df.columns = [c.strip().lower() for c in df.columns]
     lbas = df.loc[df["operation"] == "W", "lba"].to_numpy(np.int64)
+    if args.max_events:
+        lbas = lbas[: int(args.max_events)]
 
     env = GcEnv(lbas, args.total_segments, args.blocks_per_segment,
                 int(get(cfg, "gc.trigger_state_window_events", 500)),

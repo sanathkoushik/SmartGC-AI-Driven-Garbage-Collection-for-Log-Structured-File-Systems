@@ -52,6 +52,28 @@ def run_id_for(d: dict) -> str:
     return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
+def default_geometry(cfg: dict) -> dict:
+    return {
+        "total_segments": int(get(cfg, "simulator.total_segments", 32)),
+        "blocks_per_segment": int(get(cfg, "simulator.blocks_per_segment", 64)),
+        "gc_threshold": int(get(cfg, "simulator.gc_free_segments_threshold", 2)),
+    }
+
+
+def geometry_for_trace(trace_path: str, cfg: dict, live_frac: float = 0.33) -> dict:
+    """Size the storage pool from a trace's written working set so a real,
+    wide-footprint trace (e.g. UMass SPC Financial1) fits with ~1/live_frac
+    over-provisioning instead of overflowing the fixed synthetic geometry."""
+    bps = int(get(cfg, "simulator.blocks_per_segment", 64))
+    gc_thr = int(get(cfg, "simulator.gc_free_segments_threshold", 2))
+    streams = int(get(cfg, "gc.migration_stream_count", 3))
+    df = pd.read_csv(trace_path, usecols=["lba", "operation"])
+    live = int(df.loc[df["operation"] == "W", "lba"].nunique()) or int(df["lba"].nunique())
+    total_segments = max(int(get(cfg, "simulator.total_segments", 32)),
+                         math.ceil(live / (live_frac * bps)) + gc_thr + streams + 4)
+    return {"total_segments": total_segments, "blocks_per_segment": bps, "gc_threshold": gc_thr}
+
+
 # ---------------------------------------------------------------------------
 # 1. Traces
 # ---------------------------------------------------------------------------
@@ -89,12 +111,27 @@ def prepare_traces(cfg: dict, seed: int) -> dict:
     sh([PY, "-m", "ml.preprocessing.normalize", "--source", "synthetic",
         "--input", os.path.join(raw, f"{drift}.csv"), "--name", drift])
 
-    # real trace (stand-in if absent)
-    real_raw = os.path.join(raw, f"{real}.csv")
-    if not os.path.exists(real_raw):
-        sh([PY, "-m", "ml.preprocessing.make_sample_trace", "--name", real])
-    sh([PY, "-m", "ml.preprocessing.normalize", "--source", "msr",
-        "--input", real_raw, "--name", real, "--dense-lba"])
+    # real trace: prefer a genuine UMass/SPC or MSR file; fall back to the stand-in.
+    real_cap = int(get(cfg, "evaluation.real_trace_max_events", 150_000))
+    spc_candidates = [
+        os.path.join(raw, f"{real}.spc", f"{real}.spc"),
+        os.path.join(raw, f"{real}.spc"),
+        os.path.join(raw, "Financial1.spc", "Financial1.spc"),
+        os.path.join(raw, "financial_spc", "Financial1.spc"),
+    ]
+    spc_raw = next((p for p in spc_candidates if os.path.exists(p)), None)
+    msr_raw = os.path.join(raw, f"{real}.csv")
+    if spc_raw:
+        # Large OLTP trace: normalize a bounded event prefix so the LSTM +
+        # simulator pipeline stays tractable (real access pattern, capped length).
+        sh([PY, "-m", "ml.preprocessing.normalize", "--source", "spc",
+            "--input", spc_raw, "--name", real, "--dense-lba",
+            "--max-events", real_cap])
+    else:
+        if not os.path.exists(msr_raw):
+            sh([PY, "-m", "ml.preprocessing.make_sample_trace", "--name", real])
+        sh([PY, "-m", "ml.preprocessing.normalize", "--source", "msr",
+            "--input", msr_raw, "--name", real, "--dense-lba"])
 
     traces = {
         "synthetic_zipf": repo_path("data", "processed", "synthetic_zipf.csv"),
@@ -129,12 +166,16 @@ def prepare_models(traces: dict, epochs: int | None, skip_train: bool) -> None:
 
 
 def prepare_gc_policies(cfg: dict, traces: dict, episodes: int | None) -> dict:
-    ts = int(get(cfg, "simulator.total_segments", 32))
-    bps = int(get(cfg, "simulator.blocks_per_segment", 64))
     out = {}
     for name, path in traces.items():
+        synthetic = name == "synthetic_zipf"
+        geom = default_geometry(cfg) if synthetic else geometry_for_trace(path, cfg)
         cmd = [PY, "-m", "ml.training.gc_controller", "--trace", path, "--name", name,
-               "--total-segments", ts, "--blocks-per-segment", bps]
+               "--total-segments", geom["total_segments"],
+               "--blocks-per-segment", geom["blocks_per_segment"]]
+        if not synthetic:
+            # bound controller training on wide real traces (O(events x segments) in Python)
+            cmd += ["--max-events", 40_000]
         if episodes is not None:
             cmd += ["--episodes", episodes]
         sh(cmd)
@@ -263,14 +304,16 @@ def main() -> None:
         gc_policies = prepare_gc_policies(cfg, traces, episodes)
 
     print("=== [4/4] matrix cells ===")
-    geom = {
-        "total_segments": int(get(cfg, "simulator.total_segments", 32)),
-        "blocks_per_segment": int(get(cfg, "simulator.blocks_per_segment", 64)),
-        "gc_threshold": int(get(cfg, "simulator.gc_free_segments_threshold", 2)),
-    }
+    default_geom = default_geometry(cfg)
+    geom_cache: dict[str, dict] = {"synthetic_zipf": default_geom}
     for cell in matrix_cells(traces, cfg):
-        run_cell(cfg, out_csv, cell["policy"], cell["trace"], traces[cell["trace"]],
-                 cell["learned"], gc_policies.get(cell["trace"]), geom, seed, streams, conf_thr)
+        tname = cell["trace"]
+        if tname not in geom_cache:
+            # real / drift legs: size the pool from the trace's working set
+            geom_cache[tname] = geometry_for_trace(traces[tname], cfg)
+            print(f"  [run_matrix] geometry for {tname}: {geom_cache[tname]}")
+        run_cell(cfg, out_csv, cell["policy"], tname, traces[tname],
+                 cell["learned"], gc_policies.get(tname), geom_cache[tname], seed, streams, conf_thr)
 
     if args.op_sweep:
         print("=== [+] OP sweep ===")

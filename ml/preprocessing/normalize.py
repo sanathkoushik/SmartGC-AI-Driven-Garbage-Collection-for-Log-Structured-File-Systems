@@ -110,6 +110,34 @@ def normalize_msr(path: str, block_size: int, **kw) -> pd.DataFrame:
     return _finalize(out, **kw)
 
 
+# 512-byte-sector index space large enough to keep every ASU's addresses disjoint.
+_SPC_ASU_STRIDE = 1 << 36
+
+
+def normalize_spc(path: str, block_size: int, **kw) -> pd.DataFrame:
+    """UMass / SPC storage traces (e.g. Financial1/Financial2 OLTP).
+
+    Header-less CSV rows of ``ASU,LBA,Size,Opcode,Timestamp`` where ``LBA`` is a
+    512-byte-sector index *within its ASU*, ``Size`` is a byte count, ``Opcode``
+    is ``r``/``w`` and ``Timestamp`` is elapsed seconds (float).  Each ASU is
+    given a disjoint region of the address space and the combined sector index is
+    folded to the simulator's 4 KiB page granularity (8 sectors per page).
+    """
+    cols = ["asu", "lba", "size", "opcode", "timestamp"]
+    df = pd.read_csv(path, header=None, names=cols, engine="c", on_bad_lines="skip")
+    asu = pd.to_numeric(df["asu"], errors="coerce").fillna(0).astype("int64")
+    sector = pd.to_numeric(df["lba"], errors="coerce").fillna(0).astype("int64")
+    sectors_per_page = max(1, block_size // 512)
+    out = pd.DataFrame({
+        # scale seconds -> microseconds so sub-second event order survives rebasing
+        "timestamp": pd.to_numeric(df["timestamp"], errors="coerce") * 1_000_000.0,
+        "lba": ((asu * _SPC_ASU_STRIDE + sector) // sectors_per_page).astype("int64"),
+        "size": _bytes_to_blocks(df["size"], block_size),
+        "operation": df["opcode"].map(_to_op),
+    })
+    return _finalize(out, **kw)
+
+
 def normalize_auto(path: str, block_size: int, **kw) -> pd.DataFrame:
     df = pd.read_csv(path)
     df.columns = [c.strip().lower() for c in df.columns]
@@ -143,6 +171,7 @@ def normalize_auto(path: str, block_size: int, **kw) -> pd.DataFrame:
 _DISPATCH = {
     "synthetic": normalize_synthetic,
     "msr": normalize_msr,
+    "spc": normalize_spc,
     "auto": normalize_auto,
 }
 

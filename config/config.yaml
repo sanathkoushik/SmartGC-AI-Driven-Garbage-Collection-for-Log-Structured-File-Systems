@@ -96,5 +96,6 @@ gc:
 # ------------------------------------------------------------------------------
 evaluation:
   op_ratio_sweep: [0.10, 0.20, 0.30]      # live-set / capacity ratios for the OP sweep
-  real_trace_name: "msr_cambridge_src1"   # set once the Phase 2 real trace is chosen
+  real_trace_name: "financial1"           # UMass/SPC Financial1 OLTP trace (76.8% writes)
+  real_trace_max_events: 400000           # bounded event prefix for the LSTM+sim pipeline (71.9% writes)
   drift_scenario_name: "synthetic_drift"  # concatenated two-phase synthetic workload
