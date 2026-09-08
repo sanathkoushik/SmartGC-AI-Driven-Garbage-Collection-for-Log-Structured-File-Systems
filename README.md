@@ -41,10 +41,13 @@ real traces.
    `STAT_ML` (a lightweight gradient-boosted regressor on the same features) →
    `LSTM_SMARTGC` (vanilla 2-layer LSTM) → `LSTM_ATTN_SMARTGC` (LSTM + additive
    attention, multi-stream). If a cheap rung wins, that is the reported result.
-4. **Real-trace validation.** The pipeline ingests MSR-Cambridge-format block
-   traces (SNIA IOTTA) in addition to the synthetic Zipf workload and a
-   concatenated workload-drift scenario. A genuine trace is not vendored (size +
-   licence); a format-accurate stand-in ships so the pipeline runs end-to-end.
+4. **Real-trace validation.** The benchmark's real leg runs on the **UMass SPC
+   Financial1** OLTP block trace (`--source spc`; 5.33M events, 76.8% writes) in
+   addition to the synthetic Zipf workload and a concatenated workload-drift
+   scenario. A bounded 400k-event prefix is used so the LSTM + simulator pipeline
+   stays tractable. `--source msr` / `--source auto` and a format-accurate
+   stand-in (`make_sample_trace.py`) remain available. Financial2 was inspected
+   and excluded (17.7% writes — read-dominated).
 5. **Accuracy-vs-inference-cost reporting.** Parameter count, inference latency,
    throughput and memory are reported next to the WAF numbers, so the
    host-side-ML-overhead question (raised by in-storage-inference work such as
@@ -88,7 +91,7 @@ An essential design principle in SmartGC is the independence of validity and tem
 The project is decoupled into two independent components communicating strictly via CSV files:
 
 ```
-Raw I/O Trace  (synthetic Zipf  |  MSR/FIU real block trace  |  drift scenario)
+Raw I/O Trace  (synthetic Zipf  |  UMass SPC Financial1 real trace  |  drift scenario)
       │
       ▼
 [Phase 2: ml/preprocessing/normalize.py]  ── trace_stats_<name>.csv

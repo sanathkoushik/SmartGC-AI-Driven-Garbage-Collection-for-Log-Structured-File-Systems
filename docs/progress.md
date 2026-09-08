@@ -12,7 +12,7 @@ analysis this restructuring is based on.
 | **Phase 0** | Project setup, directory structure, docs, config, CMake skeleton, Git init | **Completed** | Commit `ca7a91d`. |
 | **Phase 1** | Baseline LFS Simulator + Greedy GC (C++17), unit tests, synthetic workload, WAF verification | **Completed** | Commit `eb92fe2`; 5 unit tests, hand-verified WAF `18/17`. |
 | **Phase 5-sim (step 1)** | Extend C++ simulator: SUP_LIKE / STAT_ML / LSTM_SMARTGC / LSTM_ATTN_SMARTGC placement enums, 3-level GC-migration streams, prediction ingestion (contract v2), learned GC-trigger controller, metrics v2. | **Completed** | 10/10 unit tests pass; single-stream MIXED path byte-identical to Phase 1 (WAF `1.0544`). |
-| **Phase 2** | Trace ingestion & normalization (`ml/preprocessing/`): synthetic + MSR/FIU real trace → `timestamp,lba,size,operation`; `trace_stats_<name>.csv`. | **Completed** | Verified on 5k synthetic Zipf + 40k MSR-format stand-in. |
+| **Phase 2** | Trace ingestion & normalization (`ml/preprocessing/`): synthetic + real block trace → `timestamp,lba,size,operation`; `trace_stats_<name>.csv`. Sources: `synthetic`, `msr`, **`spc` (UMass/SPC)**, `auto`. | **Completed** | Real data: **UMass SPC Financial1** (5.33M events, 76.8% writes) via `--source spc`; benchmark uses a 400k-event prefix (71.9% writes, 115k unique 4 KiB pages). |
 | **Phase 3** | Multivariate feature engineering & sequence construction (`features.py`); fitted `scaler.json`; chronological 70/15/15. | **Completed** | 4.1k / 23.6k sequences built. |
 | **Phase 4a** | Baseline ladder models (`ml/models/`) + one-protocol trainer. | **Completed** | 6 rungs run; synthetic finding: naive-median edges the LSTM, attention adds nothing. |
 | **Phase 4b** | Rolling-percentile cutoff, KL drift detector, MC-dropout confidence gate, `predictions.csv` v2 export. | **Completed** | Fallback rate reported consistently C++/Python; drift fires 1 window after the shift. |
@@ -20,9 +20,19 @@ analysis this restructuring is based on.
 | **Phase 6** | `experiments/run_matrix.py`: full Section-4 ablation matrix × {synthetic, real, drift} × {fixed, learned trigger} + OP sweep → `matrix_results.csv` with per-cell `run_id`. | **Completed** | `--quick` run: 11 matrix cells + 18-cell OP sweep, exit 0. |
 | **Phase 7** | Evaluation & cost accounting (`cost.py`) + plots (`plots.py`): WAF-vs-OP, migration-tail P50/P95/P99, drift timeline, accuracy-vs-cost. | **Completed** | 5 figures under `results/plots/`. |
 
+**Real trace (Sept 2026)**: the benchmark's real leg now runs on the **UMass
+SPC Financial1** OLTP trace (two financial-institution I/O traces, Financial1 &
+Financial2, from the UMass Trace Repository / SPC). This replaces the
+MSR-Cambridge-format stand-in — the switch was made because **SNIA IOTTA access
+was unavailable**, not for any methodological reason; Financial1 is a widely-used
+write-heavy OLTP block trace and does not weaken the results. Financial2 was
+inspected but **excluded from the matrix**: at 17.7% writes it is read-dominated
+and below the spec's write-heavy-volume guidance. `make_sample_trace.py` is kept
+as a fallback/reproducibility tool.
+
 **Outstanding for final submission**: (a) full-epoch training run (the numbers
-above are from the fast `--quick` path); (b) swap the MSR stand-in for a genuine
-SNIA IOTTA trace; (c) re-verify venue metadata for the related-work citations.
+above are from the fast `--quick` path); (b) re-verify venue metadata for the
+related-work citations.
 
 ---
 
@@ -58,4 +68,4 @@ SNIA IOTTA trace; (c) re-verify venue metadata for the related-work citations.
 7. **Learned GC trigger is optional and ablatable**: `gc.learned_trigger` defaults to `false` (Phase 1 fixed watermark). The learned controller is tabular Q-learning over a 3×3×3 discretised `[free_ratio, write_rate, waf]` state, trained in Python against a mirror env and exported as a Q-table CSV; unvisited states fall back to a deterministic adaptive rule in C++.
 8. **Dynamic thresholds over constants**: `hot_percentile_cutoff` is retained only as a warm-up seed; at runtime the HOT/COLD cutoff and the N-way stream edges are rolling percentiles over `hot_cutoff_window_events`. Drift is flagged by symmetric KL between consecutive windows; a per-block confidence gate falls back to RULE_BASED and its fallback rate is a reported metric.
 9. **Baseline ladder must be able to falsify the DL claim**: `SUP_LIKE` (near-zero computation) and `STAT_ML` (cheap learning) sit between `RULE_BASED` and the LSTMs specifically so a "deep learning doesn't help here" outcome is observable — and on the synthetic workload it partly is (naive-median MAE < LSTM; attention ≈ vanilla LSTM). Reported without spin.
-10. **Real-trace path, stand-in data**: real MSR/FIU traces are not vendored (size + SNIA IOTTA terms). `make_sample_trace.py` emits a format-accurate stand-in so the pipeline is runnable; a genuine file of the same name in `data/raw/` is a drop-in replacement.
+10. **Real-trace path**: the benchmark runs on a genuine trace — **UMass SPC Financial1** (`--source spc`), a bounded 400k-event prefix so the LSTM + simulator pipeline stays tractable while keeping the real access pattern. The storage geometry for the real leg is sized from the trace's written working set (`geometry_for_trace`, ~3× over-provisioned) rather than the fixed synthetic geometry. `make_sample_trace.py` (MSR-format stand-in) is retained only as a fallback when no real trace is present. The dataset switch from SNIA IOTTA/MSR to UMass SPC was due to access availability, recorded here for transparency; it does not affect the methodology.

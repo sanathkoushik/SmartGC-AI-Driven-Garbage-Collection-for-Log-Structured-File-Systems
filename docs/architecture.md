@@ -55,8 +55,10 @@ builders and the C++ simulator trace player (`smartgc_sim --trace`).
 **Header Format**: `timestamp,lba,size,operation`
 
 `normalize.py` ingests `--source synthetic` (the `smartgc_sim --export-trace`
-CSV), `--source msr` (MSR Cambridge FILETIME/byte-offset rows), or `--source
-auto` (header-sniffed FIU/blktrace exports), with optional `--dense-lba`,
+CSV), `--source spc` (UMass/SPC `ASU,LBA,Size,Opcode,Timestamp` rows — LBA is a
+512-byte sector index per ASU, Size is bytes, Timestamp is elapsed seconds),
+`--source msr` (MSR Cambridge FILETIME/byte-offset rows), or `--source auto`
+(header-sniffed FIU/blktrace exports), with optional `--dense-lba`,
 `--working-set` folding and `--max-events` truncation.
 
 ### 2.2 Predictions Contract (`data/predictions/*.csv`) — v2
@@ -142,16 +144,20 @@ constant. For each write event, in trace order:
 SHORT/…/LONG bucket edges are the evenly-spaced `100·k/N` percentiles of the
 window.
 
-### 2.7 Real-trace licence / attribution
-The benchmark's real-trace slot (`evaluation.real_trace_name`, default
-`msr_cambridge_src1`) expects an **MSR Cambridge** block-I/O trace from the
-**SNIA IOTTA** repository (Narayanan et al., "Write Off-Loading: Practical Power
-Management for Enterprise Storage", FAST '08). Those traces are distributed
-under the SNIA IOTTA repository terms and are **not vendored** here (size +
-licence). `ml/preprocessing/make_sample_trace.py` emits a synthetic **stand-in**
-in the exact MSR on-disk layout so the pipeline runs end-to-end; drop a genuine
-`data/raw/<name>.csv` of the same name in to obtain a real-data result — nothing
-else changes. FIU / SNIA blktrace exports work through `--source auto`.
+### 2.7 Real-trace source / attribution
+The benchmark's real-trace slot (`evaluation.real_trace_name = "financial1"`)
+uses the **UMass SPC Financial1** trace — OLTP block I/O from a financial
+institution, distributed via the **UMass Trace Repository** (originally the
+Storage Performance Council, SPC-1). Financial1 (5.33M events, **76.8% writes**)
+and Financial2 (3.70M events, **17.7% writes**) were both inspected with
+`trace_stats.py`; Financial2 is read-dominated and is **excluded** from the
+matrix per the write-heavy-volume guidance. The `.spc` files are not vendored
+(size); `run_matrix.py` normalizes a bounded `evaluation.real_trace_max_events`
+prefix via `--source spc`. This dataset replaced an MSR-Cambridge / SNIA IOTTA
+plan due to access availability, not methodology.
+`ml/preprocessing/make_sample_trace.py` still emits an MSR-format **stand-in**
+for reproducibility when no real trace is present; FIU / SNIA blktrace exports
+work through `--source auto`.
 
 ---
 
