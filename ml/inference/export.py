@@ -32,6 +32,33 @@ def _load_scaler(path: str) -> dict:
         return json.load(fh)
 
 
+def _build_or_load_sequences(trace_path: str, seq_len: int, rolling_window: int, scaler: dict):
+    """Build the per-write-event inference windows for a trace, caching the
+    (expensive on a 400k-event real trace) result next to the trace keyed on the
+    trace + scaler mtimes and seq_len. Every ML policy on the same trace then
+    reuses one build instead of recomputing it."""
+    cache = os.path.splitext(trace_path)[0] + f".infer_seq_sl{seq_len}.npz"
+    scaler_path = repo_path("ml", "models", "scaler.json")
+    key = f"{os.path.getmtime(trace_path):.0f}|{os.path.getmtime(scaler_path):.0f}|{seq_len}"
+    if os.path.exists(cache):
+        try:
+            z = np.load(cache, allow_pickle=True)
+            if str(z["key"]) == key:
+                return z["Xs"], z["meta"], z["has_history"]
+        except Exception:
+            pass
+    df = pd.read_csv(trace_path)
+    df.columns = [c.strip().lower() for c in df.columns]
+    feat = build_event_features(df, rolling_window)
+    X, meta, has_history = build_inference_sequences(feat, seq_len)
+    Xs = apply_scaler(X, scaler)
+    try:
+        np.savez_compressed(cache, Xs=Xs, meta=meta, has_history=has_history, key=np.array(key))
+    except Exception:
+        pass
+    return Xs, meta, has_history
+
+
 def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
                n_streams: int, cfg: dict) -> dict:
     ml = cfg.get("ml", {})
@@ -39,11 +66,7 @@ def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
     rolling_window = seq_len
     scaler = _load_scaler(repo_path("ml", "models", "scaler.json"))
 
-    df = pd.read_csv(trace_path)
-    df.columns = [c.strip().lower() for c in df.columns]
-    feat = build_event_features(df, rolling_window)
-    X, meta, has_history = build_inference_sequences(feat, seq_len)
-    Xs = apply_scaler(X, scaler)
+    Xs, meta, has_history = _build_or_load_sequences(trace_path, seq_len, rolling_window, scaler)
     lbas, widx, ts = meta[:, 0], meta[:, 1], meta[:, 2]
 
     # Model + always-available RULE_BASED fallback predictions.
