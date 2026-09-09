@@ -230,13 +230,13 @@ def matrix_cells(traces: dict, cfg: dict) -> list[dict]:
     drift = str(get(cfg, "evaluation.drift_scenario_name", "synthetic_drift"))
     cells = [{"policy": p, "trace": "synthetic_zipf", "learned": False} for p in LADDER]
     cells.append({"policy": BEST, "trace": "synthetic_zipf", "learned": True})
-    # real trace: run the ladder baselines (MIXED / RULE_BASED) too, so the
-    # before/after on real data is apples-to-apples with the same geometry.
-    for p in ("MIXED", "RULE_BASED"):
-        cells.append({"policy": p, "trace": real, "learned": False})
-    for t in (real, drift):
-        cells.append({"policy": BEST, "trace": t, "learned": False})
-        cells.append({"policy": BEST, "trace": t, "learned": True})
+    # real trace: run the FULL ladder (fixed trigger) so the real-data comparison
+    # is apples-to-apples with the synthetic ladder, then the best model x learned.
+    cells += [{"policy": p, "trace": real, "learned": False} for p in LADDER]
+    cells.append({"policy": BEST, "trace": real, "learned": True})
+    # drift scenario: best model, fixed vs learned trigger.
+    cells.append({"policy": BEST, "trace": drift, "learned": False})
+    cells.append({"policy": BEST, "trace": drift, "learned": True})
     return cells
 
 
@@ -247,27 +247,30 @@ def op_sweep(cfg: dict, traces: dict, seed: int, streams: int, conf_thr: float) 
     out_csv = repo_path("results", "metrics", "op_sweep.csv")
     if os.path.exists(out_csv):
         os.remove(out_csv)
-    trace_name = "synthetic_zipf"
-    trace_path = traces[trace_name]
     bps = int(get(cfg, "simulator.blocks_per_segment", 64))
     gc_thr = int(get(cfg, "simulator.gc_free_segments_threshold", 2))
-    live = int(pd.read_csv(trace_path)["lba"].nunique())
-    for op in get(cfg, "evaluation.op_ratio_sweep", [0.10, 0.20, 0.30]):
-        total_segments = max(8, math.ceil(live / (float(op) * bps)) + gc_thr + streams + 2)
-        geom = {"total_segments": total_segments, "blocks_per_segment": bps, "gc_threshold": gc_thr}
-        for policy in LADDER:
-            effective = {"op_ratio": op, "policy": policy, "trace": trace_name, **geom, "seed": seed}
-            rid = run_id_for(effective)
-            preds = export_predictions(policy, trace_path, trace_name, streams)
-            cmd = [SIM, "--placement-policy", policy, "--trace", trace_path,
-                   "--total-segments", total_segments, "--blocks-per-segment", bps,
-                   "--gc-threshold", gc_thr, "--migration-streams", streams, "--seed", seed,
-                   "--workload-name", f"{trace_name}_op{op}", "--run-id", rid,
-                   "--export-metrics", out_csv, "--quiet"]
-            if preds:
-                cmd += ["--predictions", preds, "--confidence-threshold", conf_thr]
-            sh(cmd)
-    print(f"[run_matrix] OP sweep -> {out_csv}")
+    real = str(get(cfg, "evaluation.real_trace_name", "financial1"))
+    sweep_traces = ["synthetic_zipf"] + ([real] if real in traces else [])
+    for trace_name in sweep_traces:
+        trace_path = traces[trace_name]
+        w = pd.read_csv(trace_path, usecols=["lba", "operation"])
+        live = int(w.loc[w["operation"] == "W", "lba"].nunique()) or int(w["lba"].nunique())
+        for op in get(cfg, "evaluation.op_ratio_sweep", [0.10, 0.20, 0.30]):
+            total_segments = max(8, math.ceil(live / (float(op) * bps)) + gc_thr + streams + 2)
+            geom = {"total_segments": total_segments, "blocks_per_segment": bps, "gc_threshold": gc_thr}
+            for policy in LADDER:
+                effective = {"op_ratio": op, "policy": policy, "trace": trace_name, **geom, "seed": seed}
+                rid = run_id_for(effective)
+                preds = export_predictions(policy, trace_path, trace_name, streams)
+                cmd = [SIM, "--placement-policy", policy, "--trace", trace_path,
+                       "--total-segments", total_segments, "--blocks-per-segment", bps,
+                       "--gc-threshold", gc_thr, "--migration-streams", streams, "--seed", seed,
+                       "--workload-name", f"{trace_name}_op{op}", "--run-id", rid,
+                       "--export-metrics", out_csv, "--quiet"]
+                if preds:
+                    cmd += ["--predictions", preds, "--confidence-threshold", conf_thr]
+                sh(cmd)
+    print(f"[run_matrix] OP sweep ({', '.join(sweep_traces)}) -> {out_csv}")
     return out_csv
 
 
@@ -277,13 +280,14 @@ def main() -> None:
     seed = int(get(cfg, "random_seed", 42))
     ap = argparse.ArgumentParser(description="SmartGC Phase 6 benchmark matrix")
     ap.add_argument("--quick", action="store_true", help="few epochs / episodes for a fast dry run")
+    ap.add_argument("--epochs", type=int, default=None, help="override ml.epochs for this run")
     ap.add_argument("--skip-train", action="store_true", help="reuse existing trained models")
     ap.add_argument("--skip-prep", action="store_true", help="reuse existing traces/features/models/policies")
     ap.add_argument("--op-sweep", action="store_true", help="also run the over-provisioning sweep")
     ap.add_argument("--append", action="store_true", help="append to matrix_results.csv instead of resetting")
     args = ap.parse_args()
 
-    epochs = 3 if args.quick else None
+    epochs = args.epochs if args.epochs is not None else (3 if args.quick else None)
     episodes = 8 if args.quick else None
     streams = int(get(cfg, "gc.migration_stream_count", 3))
     conf_thr = float(get(cfg, "ml.confidence_fallback_threshold", 0.55))
@@ -308,14 +312,18 @@ def main() -> None:
         gc_policies = prepare_gc_policies(cfg, traces, episodes)
 
     print("=== [4/4] matrix cells ===")
+    real = str(get(cfg, "evaluation.real_trace_name", "financial1"))
+    real_op = float(get(cfg, "evaluation.real_op_ratio", 0.66))
     default_geom = default_geometry(cfg)
     geom_cache: dict[str, dict] = {"synthetic_zipf": default_geom}
     for cell in matrix_cells(traces, cfg):
         tname = cell["trace"]
         if tname not in geom_cache:
-            # real / drift legs: size the pool from the trace's working set
-            geom_cache[tname] = geometry_for_trace(traces[tname], cfg)
-            print(f"  [run_matrix] geometry for {tname}: {geom_cache[tname]}")
+            # real leg is stressed (~1.5x OP) so GC engages on the wide OLTP
+            # footprint; the drift scenario keeps the looser default sizing.
+            lf = real_op if tname == real else 0.33
+            geom_cache[tname] = geometry_for_trace(traces[tname], cfg, live_frac=lf)
+            print(f"  [run_matrix] geometry for {tname} (live_frac={lf}): {geom_cache[tname]}")
         run_cell(cfg, out_csv, cell["policy"], tname, traces[tname],
                  cell["learned"], gc_policies.get(tname), geom_cache[tname], seed, streams, conf_thr)
 

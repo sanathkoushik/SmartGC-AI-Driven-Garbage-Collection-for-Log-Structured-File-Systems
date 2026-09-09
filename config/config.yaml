@@ -53,7 +53,8 @@ ml:
   dropout: 0.1             # Dropout probability
   batch_size: 64           # Mini-batch training size
   learning_rate: 0.001     # Adam optimizer learning rate
-  epochs: 25               # Training epochs
+  epochs: 25               # Training epochs (upper bound)
+  early_stop_patience: 4   # stop if val loss does not improve for N epochs (0 = off)
   loss_function: "SmoothL1" # MAE / SmoothL1
   train_split: 0.70        # Train dataset fraction (chronological)
   val_split: 0.15          # Validation dataset fraction (chronological)
@@ -96,6 +97,8 @@ gc:
 # ------------------------------------------------------------------------------
 evaluation:
   op_ratio_sweep: [0.10, 0.20, 0.30]      # live-set / capacity ratios for the OP sweep
+  real_op_ratio: 0.66                      # live-set / capacity for the real-trace matrix leg
+                                          # (~1.5x OP so GC actually engages on the wide OLTP trace)
   real_trace_name: "financial1"           # UMass/SPC Financial1 OLTP trace (76.8% writes)
   real_trace_max_events: 400000           # bounded event prefix for the LSTM+sim pipeline (71.9% writes)
   drift_scenario_name: "synthetic_drift"  # concatenated two-phase synthetic workload

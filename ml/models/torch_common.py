@@ -49,6 +49,7 @@ class TorchIntervalModel(BaseIntervalModel):
         epochs = int(cfg.get("epochs", 25))
         bs = int(cfg.get("batch_size", 64))
         lr = float(cfg.get("learning_rate", 1e-3))
+        patience = int(cfg.get("early_stop_patience", 0))  # 0 => disabled
         loss_name = str(cfg.get("loss_function", "SmoothL1")).lower()
         criterion = nn.SmoothL1Loss() if "smooth" in loss_name or "l1" in loss_name else nn.MSELoss()
         opt = torch.optim.Adam(self.module.parameters(), lr=lr)
@@ -64,7 +65,7 @@ class TorchIntervalModel(BaseIntervalModel):
             val = (torch.tensor(X_val, dtype=torch.float32),
                    torch.tensor(y_val, dtype=torch.float32))
 
-        best_val, best_state = float("inf"), None
+        best_val, best_state, since_improved = float("inf"), None, 0
         for ep in range(epochs):
             self.module.train()
             tot = 0.0
@@ -81,13 +82,19 @@ class TorchIntervalModel(BaseIntervalModel):
                 with torch.no_grad():
                     vp = self.module(val[0].to(self.device)).squeeze(-1)
                     vl = float(criterion(vp, val[1].to(self.device)))
-                if vl < best_val:
-                    best_val = vl
+                if vl < best_val - 1e-5:
+                    best_val, since_improved = vl, 0
                     best_state = {k: v.clone() for k, v in self.module.state_dict().items()}
+                else:
+                    since_improved += 1
                 tag = f" val={vl:.4f}"
             else:
                 tag = ""
             print(f"  [{self.name}] epoch {ep + 1:>2}/{epochs}  train={tr:.4f}{tag}")
+            if val is not None and patience and since_improved >= patience:
+                print(f"  [{self.name}] early stop at epoch {ep + 1} "
+                      f"(no val gain for {patience} epochs; best val={best_val:.4f})")
+                break
         if best_state is not None:
             self.module.load_state_dict(best_state)
         return self
