@@ -39,8 +39,21 @@ data/predictions/*
 # Results & logs
 results/metrics/*
 !results/metrics/.gitkeep
+# Headline benchmark artefacts are versioned (expensive to regenerate: a full
+# run_matrix is ~30-40 min). Everything else under results/ stays ignored.
+!results/metrics/matrix_results.csv
+!results/metrics/op_sweep.csv
+!results/metrics/model_cost.csv
+!results/metrics/trace_stats_financial1.csv
+!results/metrics/trace_stats_financial1_hist.csv
 results/plots/*
 !results/plots/.gitkeep
+!results/plots/ladder_waf.png
+!results/plots/real_ladder_waf.png
+!results/plots/waf_vs_op.png
+!results/plots/gc_migration_tail.png
+!results/plots/drift_timeline.png
+!results/plots/accuracy_vs_cost.png
 *.log
 
 # IDE & OS files

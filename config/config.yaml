@@ -96,7 +96,9 @@ gc:
 # Evaluation & cost accounting (Phase 6 & 7)
 # ------------------------------------------------------------------------------
 evaluation:
-  op_ratio_sweep: [0.10, 0.20, 0.30]      # live-set / capacity ratios for the OP sweep
+  op_ratio_sweep: [0.10, 0.20, 0.30]      # live-set / capacity ratios for the synthetic OP sweep
+  real_op_ratio_sweep: [0.50, 0.66, 0.85] # tighter ratios for the real trace - the wide OLTP
+                                          # footprint stays at WAF 1.0 until ~2x OP or less
   real_op_ratio: 0.66                      # live-set / capacity for the real-trace matrix leg
                                           # (~1.5x OP so GC actually engages on the wide OLTP trace)
   real_trace_name: "financial1"           # UMass/SPC Financial1 OLTP trace (76.8% writes)

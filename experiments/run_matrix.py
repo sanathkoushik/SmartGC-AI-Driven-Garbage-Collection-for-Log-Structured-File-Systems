@@ -251,11 +251,13 @@ def op_sweep(cfg: dict, traces: dict, seed: int, streams: int, conf_thr: float) 
     gc_thr = int(get(cfg, "simulator.gc_free_segments_threshold", 2))
     real = str(get(cfg, "evaluation.real_trace_name", "financial1"))
     sweep_traces = ["synthetic_zipf"] + ([real] if real in traces else [])
+    syn_ops = get(cfg, "evaluation.op_ratio_sweep", [0.10, 0.20, 0.30])
+    real_ops = get(cfg, "evaluation.real_op_ratio_sweep", [0.50, 0.66, 0.85])
     for trace_name in sweep_traces:
         trace_path = traces[trace_name]
         w = pd.read_csv(trace_path, usecols=["lba", "operation"])
         live = int(w.loc[w["operation"] == "W", "lba"].nunique()) or int(w["lba"].nunique())
-        for op in get(cfg, "evaluation.op_ratio_sweep", [0.10, 0.20, 0.30]):
+        for op in (real_ops if trace_name == real else syn_ops):
             total_segments = max(8, math.ceil(live / (float(op) * bps)) + gc_thr + streams + 2)
             geom = {"total_segments": total_segments, "blocks_per_segment": bps, "gc_threshold": gc_thr}
             for policy in LADDER:
@@ -284,8 +286,13 @@ def main() -> None:
     ap.add_argument("--skip-train", action="store_true", help="reuse existing trained models")
     ap.add_argument("--skip-prep", action="store_true", help="reuse existing traces/features/models/policies")
     ap.add_argument("--op-sweep", action="store_true", help="also run the over-provisioning sweep")
+    ap.add_argument("--op-sweep-only", action="store_true",
+                    help="run ONLY the over-provisioning sweep (reuse prep, skip matrix cells)")
     ap.add_argument("--append", action="store_true", help="append to matrix_results.csv instead of resetting")
     args = ap.parse_args()
+    if args.op_sweep_only:
+        args.skip_prep = True
+        args.op_sweep = True
 
     epochs = args.epochs if args.epochs is not None else (3 if args.quick else None)
     episodes = 8 if args.quick else None
@@ -294,7 +301,7 @@ def main() -> None:
 
     out_csv = repo_path("results", "metrics", "matrix_results.csv")
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
-    if os.path.exists(out_csv) and not args.append:
+    if os.path.exists(out_csv) and not args.append and not args.op_sweep_only:
         os.remove(out_csv)
 
     if args.skip_prep:
@@ -311,11 +318,17 @@ def main() -> None:
         print("=== [3/4] GC-trigger policies ===")
         gc_policies = prepare_gc_policies(cfg, traces, episodes)
 
-    print("=== [4/4] matrix cells ===")
     real = str(get(cfg, "evaluation.real_trace_name", "financial1"))
     real_op = float(get(cfg, "evaluation.real_op_ratio", 0.66))
     default_geom = default_geometry(cfg)
     geom_cache: dict[str, dict] = {"synthetic_zipf": default_geom}
+    if args.op_sweep_only:
+        print("=== OP sweep only ===")
+        op_sweep(cfg, traces, seed, streams, conf_thr)
+        print("[run_matrix] op-sweep-only complete")
+        return
+
+    print("=== [4/4] matrix cells ===")
     for cell in matrix_cells(traces, cfg):
         tname = cell["trace"]
         if tname not in geom_cache:

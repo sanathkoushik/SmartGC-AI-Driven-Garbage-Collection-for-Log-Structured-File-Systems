@@ -73,19 +73,28 @@ def plot_waf_vs_op(op_csv: str) -> None:
     if not os.path.exists(op_csv):
         return
     df = pd.read_csv(op_csv)
-    # recover the OP ratio from the workload_name suffix "..._op<ratio>"
+    # workload_name is "<trace>_op<ratio>"; split into trace + ratio.
     df["op_ratio"] = df["workload_name"].str.extract(r"_op([0-9.]+)$").astype(float)
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
-    for p in LADDER:
-        sub = df[df["placement_policy"] == p].sort_values("op_ratio")
-        if sub.empty:
-            continue
-        ax.plot(sub["op_ratio"], sub["waf"], marker="o", markersize=5,
-                color=COLORS[p], linewidth=2, label=p, zorder=3)
-        ax.text(sub["op_ratio"].iloc[-1], sub["waf"].iloc[-1], f" {p}",
-                color=COLORS[p], fontsize=8, va="center")
-    _style(ax, "WAF vs over-provisioning (live-set / capacity)", "live-set / capacity ratio", "WAF")
-    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    df["trace"] = df["workload_name"].str.replace(r"_op[0-9.]+$", "", regex=True)
+    traces = [t for t in ("synthetic_zipf", "financial1") if t in set(df["trace"])]
+    traces += [t for t in df["trace"].unique() if t not in traces]
+    if not traces:
+        return
+
+    fig, axes = plt.subplots(1, len(traces), figsize=(6.0 * len(traces), 4.6), squeeze=False)
+    for ax, tname in zip(axes[0], traces):
+        sub_t = df[df["trace"] == tname]
+        for p in LADDER:
+            sub = sub_t[sub_t["placement_policy"] == p].sort_values("op_ratio")
+            if sub.empty:
+                continue
+            ax.plot(sub["op_ratio"], sub["waf"], marker="o", markersize=5,
+                    color=COLORS[p], linewidth=2, label=p, zorder=3)
+            ax.text(sub["op_ratio"].iloc[-1], sub["waf"].iloc[-1], f" {p}",
+                    color=COLORS[p], fontsize=7.5, va="center")
+        label = "synthetic Zipf" if tname == "synthetic_zipf" else tname
+        _style(ax, f"WAF vs over-provisioning — {label}", "live-set / capacity ratio", "WAF")
+    axes[0][0].legend(frameon=False, fontsize=8, loc="upper left")
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "waf_vs_op.png"), dpi=150)
     plt.close(fig)

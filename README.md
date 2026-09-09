@@ -53,19 +53,43 @@ real traces.
    host-side-ML-overhead question (raised by in-storage-inference work such as
    Shiro) can be answered honestly rather than ignored.
 
-### Honest findings so far
+### Honest findings (full-epoch run, `results/metrics/matrix_results.csv`)
 
-- On the **synthetic Zipf** workload the per-LBA rewrite intervals are close to
-  memoryless, so a naive-median predictor edges the LSTM on raw interval MAE and
-  **additive attention adds nothing** over the vanilla LSTM — a negative result,
-  reported as-is.
-- The WAF improvement that *does* show up for `LSTM_ATTN_SMARTGC` comes
-  substantially from the **multi-stream GC-time routing**, not from placement-time
-  prediction accuracy. The ladder is built so this distinction is visible; the
-  2-stream rungs (`STAT_ML`, `LSTM_SMARTGC`) isolate the placement-only effect.
-- The learned GC trigger gives a small, workload-dependent WAF change (helps on
-  the plain synthetic workload, neutral-to-slightly-worse elsewhere in the quick
-  runs); it is kept strictly optional.
+**Write Amplification, fixed GC trigger:**
+
+| Placement policy | synthetic Zipf | real — UMass SPC Financial1 (~1.5× OP) |
+|---|---|---|
+| `MIXED` (baseline) | 1.0544 | 1.3015 |
+| `RULE_BASED` (zero-training) | 1.0430 | **1.1879** ← best on real |
+| `SUP_LIKE` (SUP-GC, ~0 compute) | 1.0526 | 1.1919 |
+| `STAT_ML` (sklearn GBDT) | 1.0488 | 1.2213 |
+| `LSTM_SMARTGC` (vanilla LSTM) | 1.0468 | 1.2184 |
+| `LSTM_ATTN_SMARTGC` (LSTM+attn, multi-stream) | **1.0072** ← best on synthetic | 1.2426 |
+
+- **The ladder falsifies the "deep learning helps" hypothesis on real data.** On
+  synthetic Zipf the multi-stream LSTM+attention is far ahead (WAF 1.007 vs
+  1.054); on the real OLTP trace the **zero-training `RULE_BASED` heuristic wins**
+  (1.188), and every learned rung is *worse* than it — though all still beat
+  `MIXED` substantially. The synthetic win was partly an artifact of the
+  generator's clean structure.
+- On synthetic Zipf the per-LBA intervals are near-memoryless: a naive-median
+  predictor edges the LSTM on interval MAE and **additive attention adds nothing**
+  over the vanilla LSTM. On the **drift scenario** (regime change mid-trace) the
+  sequence models *do* beat naive-median and attention gives a further gain — the
+  model earns its keep specifically when the workload is non-stationary.
+- On real data the **confidence gate fires ~31%** of the time (vs ~9.5% on
+  synthetic) — the model knows it is uncertain — yet still underperforms pure
+  `RULE_BASED`, i.e. it is also wrong on much of the 69% it trusts itself on.
+- `SUP_LIKE` (near-zero computation) ≈ `RULE_BASED` on real OLTP (1.192 vs
+  1.188), corroborating SUP-GC's "simplicity" thesis.
+- The **learned GC trigger** helps only when the placement policy leaves real GC
+  work on the table (e.g. it cut `MIXED` synthetic WAF ~1.054→1.048 in isolation);
+  paired with the best placement policy — which already drives GC to near zero —
+  it is a no-op. Kept strictly optional (`gc.learned_trigger`).
+- **Cost** (`results/metrics/model_cost.csv`): `STAT_ML` ~9–12k params,
+  `LSTM_SMARTGC` ~54k, `LSTM_ATTN_SMARTGC` ~56k; batch inference 2–9 ms/batch on
+  CPU. On this evidence the LSTMs' inference cost is not bought back by a WAF win
+  on real data.
 
 ### Reproducing the numbers
 

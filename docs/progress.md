@@ -30,13 +30,30 @@ inspected but **excluded from the matrix**: at 17.7% writes it is read-dominated
 and below the spec's write-heavy-volume guidance. `make_sample_trace.py` is kept
 as a fallback/reproducibility tool.
 
-**Full-epoch run (Sept 2026)**: `run_matrix.py` was re-run without `--quick`
-(`--epochs 25`, early stopping patience 4). The full 6-rung ladder now runs on
-the real (UMass SPC Financial1) leg too — not just MIXED/RULE_BASED/best — at a
-stressed ~1.5× over-provisioning point (`evaluation.real_op_ratio`) so GC
-actually engages on the wide OLTP footprint; the OP sweep now also covers the
-real trace. Numbers in `results/metrics/matrix_results.csv` supersede the
-earlier `--quick` figures.
+**Full-epoch run (Sept 2026)**: `run_matrix.py` re-run without `--quick`
+(`--epochs 25`, early stopping patience 4). The full 6-rung ladder runs on the
+real (UMass SPC Financial1) leg at a stressed ~1.5× over-provisioning point
+(`evaluation.real_op_ratio`) so GC engages on the wide OLTP footprint; the OP
+sweep covers the real trace with its own tighter ratio set
+(`evaluation.real_op_ratio_sweep`, since the real trace stays at WAF 1.0 until
+~2× OP). Two perf fixes make the run tractable: `export.py` caches the per-trace
+inference-sequence build; `RollingPercentileCutoff` recomputes its percentiles
+only every 128 events (≈40× faster on a 400k-event trace, 99.7% label parity).
+
+**Headline (WAF, fixed trigger)** — `results/metrics/matrix_results.csv`:
+
+| policy | synthetic Zipf | real SPC Financial1 (~1.5× OP) |
+|---|---|---|
+| MIXED | 1.0544 | 1.3015 |
+| RULE_BASED | 1.0430 | **1.1879** (best on real) |
+| SUP_LIKE | 1.0526 | 1.1919 |
+| STAT_ML | 1.0488 | 1.2213 |
+| LSTM_SMARTGC | 1.0468 | 1.2184 |
+| LSTM_ATTN_SMARTGC | **1.0072** (best on synthetic) | 1.2426 |
+
+The 5-rung falsifiable ladder did its job: the deep-learning approach wins big on
+the synthetic workload but **loses to the zero-training `RULE_BASED` heuristic on
+the real OLTP trace** (all rungs still beat `MIXED`). Reported without spin.
 
 **Citations**: venue/volume metadata for all seven anchor papers was verified
 against ACM DL / IEEE Xplore / ScienceDirect — see `docs/related_work.md`.
@@ -82,4 +99,4 @@ healthy write ratio (Financial2 is read-dominated and stays excluded).
 8. **Dynamic thresholds over constants**: `hot_percentile_cutoff` is retained only as a warm-up seed; at runtime the HOT/COLD cutoff and the N-way stream edges are rolling percentiles over `hot_cutoff_window_events`. Drift is flagged by symmetric KL between consecutive windows; a per-block confidence gate falls back to RULE_BASED and its fallback rate is a reported metric.
 9. **Baseline ladder must be able to falsify the DL claim**: `SUP_LIKE` (near-zero computation) and `STAT_ML` (cheap learning) sit between `RULE_BASED` and the LSTMs specifically so a "deep learning doesn't help here" outcome is observable — and on the synthetic workload it partly is (naive-median MAE < LSTM; attention ≈ vanilla LSTM). Reported without spin.
 10. **Real-trace path**: the benchmark runs on a genuine trace — **UMass SPC Financial1** (`--source spc`), a bounded 400k-event prefix so the LSTM + simulator pipeline stays tractable while keeping the real access pattern. The storage geometry for the real leg is sized from the trace's written working set (`geometry_for_trace`) — the GC-controller training pass uses ~3× over-provisioning, and the benchmark matrix / OP sweep use a **stressed ~1.5×** point (`evaluation.real_op_ratio`) so GC actually engages on the wide OLTP footprint. `make_sample_trace.py` (MSR-format stand-in) is retained only as a fallback when no real trace is present. The dataset switch from SNIA IOTTA/MSR to UMass SPC was due to access availability, recorded here for transparency; it does not affect the methodology.
-11. **Full-epoch protocol (Sept 2026)**: training runs to `ml.epochs` (25) with **early stopping** (`ml.early_stop_patience`, best-val checkpoint restored). The benchmark matrix runs the **full 6-rung ladder on the real trace**, not just MIXED/RULE_BASED/best. Reported numbers are from this run, not the earlier `--quick` (3-epoch) pass. Finding: on the plain synthetic Zipf workload the sequence models still do not beat a naive-median interval predictor and attention ≈ vanilla LSTM; on the **drift scenario** (regime change mid-trace) the sequence models *do* beat naive-median and additive attention gives a further gain — i.e. the model earns its keep specifically when the workload is non-stationary.
+11. **Full-epoch protocol (Sept 2026)**: training runs to `ml.epochs` (25) with **early stopping** (`ml.early_stop_patience`, best-val checkpoint restored). The benchmark matrix runs the **full 6-rung ladder on the real trace**, not just MIXED/RULE_BASED/best. Reported numbers are from this run, not the earlier `--quick` (3-epoch) pass. Findings: (i) on synthetic Zipf the multi-stream `LSTM_ATTN_SMARTGC` wins hard (WAF 1.007 vs MIXED 1.054) but on the real SPC Financial1 trace the **zero-training `RULE_BASED` heuristic wins** (1.188) and every learned rung is worse than it (all still beat MIXED at 1.302); (ii) on the plain synthetic workload the sequence models do not beat a naive-median interval predictor and attention ≈ vanilla LSTM, whereas on the **drift scenario** (regime change mid-trace) the sequence models *do* beat naive-median and attention gives a further gain — the model earns its keep specifically when the workload is non-stationary; (iii) the learned GC trigger only moves WAF when the placement policy leaves real GC work on the table (it helps `MIXED` in isolation), and is a no-op paired with the best placement policy.
