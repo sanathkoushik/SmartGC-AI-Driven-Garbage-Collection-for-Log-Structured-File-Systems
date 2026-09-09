@@ -1,8 +1,18 @@
-# Build directories
+# ==============================================================================
+# SmartGC .gitignore
+#
+# Policy: large *inputs* and *intermediates* stay out of the repository; small
+# *results* stay in, because the conference artefact must be inspectable without
+# re-running the pipeline. Raw traces are several GB and are reproduced by
+# scripts/download_datasets.py; measured metrics, statistics and plots are not.
+# ==============================================================================
+
+# ---------------------------------------------------------------- build output
 build/
 bin/
 *.obj
 *.o
+*.a
 *.exe
 *.out
 *.app
@@ -12,34 +22,47 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 
-# Python / ML artifacts
+# ------------------------------------------------------------- Python runtime
 __pycache__/
 *.py[cod]
 *$py.class
 .ipynb_checkpoints/
+.pytest_cache/
 .venv/
 venv/
 env/
-*.pt
-*.pth
 *.pkl
 
-# Raw and generated large datasets
+# --------------------------------------------------- datasets and intermediates
+# Raw traces (multi-GB, licensed downloads) are never committed.
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/README.md
+# Normalized traces and generated sequences are large regenerable intermediates.
 data/processed/*
 !data/processed/.gitkeep
+# Per-write prediction files are large; keep the directory and its schema note.
 data/predictions/*
 !data/predictions/.gitkeep
 
-# Results & logs
-results/metrics/*
-!results/metrics/.gitkeep
-results/plots/*
-!results/plots/.gitkeep
+# Small, real trace samples used as parser fixtures ARE committed: they are the
+# only way to run the pipeline end-to-end without the licensed bulk download.
+!tests/fixtures/
+!tests/fixtures/**
+
+# ----------------------------------------------------------------- ML artefacts
+# Trained checkpoints are small (a lightweight LSTM) and are part of the
+# reproducibility artefact, so they are tracked. Optimiser states are not.
+*.optim.pt
+models/**/*.tmp
+
+# --------------------------------------------------------------------- results
+# results/ is tracked: metrics CSVs, dataset statistics, plots and the final
+# conference tables are the deliverable. Only scratch output is excluded.
+results/**/scratch/
 *.log
 
-# IDE & OS files
+# ------------------------------------------------------------------ IDE and OS
 .vscode/
 .idea/
 .DS_Store

@@ -12,8 +12,17 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Statically link the GCC runtime on MinGW/MSYS2. Besides removing the need to
+# ship libstdc++/libgcc DLLs alongside the binaries, some MSYS2 installations
+# cannot link against the shared runtime at all (ld exits 116 with no
+# diagnostic), which otherwise blocks the build entirely.
+if(MINGW)
+    add_link_options(-static-libgcc -static-libstdc++)
+endif()
+
 # Core simulator library
 add_library(simulator_core STATIC
+    src/config.cpp
     src/segment.cpp
     src/lfs_simulator.cpp
     src/synthetic_workload.cpp

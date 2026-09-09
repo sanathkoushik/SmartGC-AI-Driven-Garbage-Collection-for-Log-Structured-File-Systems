@@ -1,58 +1,78 @@
 # ==============================================================================
 # SmartGC System Configuration
+#
+# The C++ simulator reads `random_seed`, `simulator:` and `synthetic_workload:`
+# via simulator/src/config.cpp. Unknown keys inside those two sections are a hard
+# error, so a typo can never silently fall back to a default. The remaining
+# sections are consumed by the Python ML subsystem.
 # ==============================================================================
 
 # Global seed for reproducible runs (simulator workloads & ML splitting/training)
 random_seed: 42
 
 # ------------------------------------------------------------------------------
-# Simulator Geometry & Baseline Parameters (Phase 1+)
+# Simulator Geometry & GC Parameters
 # ------------------------------------------------------------------------------
 simulator:
-  # Size of each individual block in bytes (default: 4096 bytes / 4KB)
+  # Size of each individual block in bytes (4096 bytes / 4KB)
   block_size_bytes: 4096
 
-  # Number of blocks contained within a single segment (e.g., 64 blocks = 256KB segment)
+  # Number of blocks contained within a single segment (64 blocks = 256KB segment)
   blocks_per_segment: 64
 
   # Total number of physical segments available in the storage pool
   total_segments: 32
 
-  # GC trigger threshold (low watermark):
-  # Trigger GC when free segments count <= gc_free_segments_threshold
+  # GC trigger low watermark: a user write that needs a fresh segment cleans
+  # until strictly more than this many segments are free.
   gc_free_segments_threshold: 2
 
-  # Garbage Collection victim selection policy:
-  # Options: GREEDY (minimum valid blocks)
+  # Over-provisioning reserve: segments that only the garbage collector may
+  # consume. Must be >= 1. A victim segment is never fully valid, so it holds at
+  # most blocks_per_segment - 1 surviving blocks and a single reserved segment
+  # always absorbs one cleaning pass. Without this reserve the free pool can be
+  # exhausted mid-migration at high utilization.
+  gc_reserved_segments: 2
+
+  # Route GC migrations through their own append point rather than interleaving
+  # surviving data into a user log. Set to false to measure "GC stream
+  # separation alone" as an ablation.
+  gc_separate_stream: true
+
+  # Garbage collection victim selection policy. Options: GREEDY (minimum valid blocks)
   gc_policy: "GREEDY"
 
-  # Placement policy for incoming writes:
+  # Placement policy for incoming writes.
   # Options: MIXED (baseline), RULE_BASED (heuristic), LSTM_SMARTGC (predicted)
   placement_policy: "MIXED"
 
 # ------------------------------------------------------------------------------
-# Synthetic Workload Generator Settings (Phase 1 Validation)
+# Synthetic Workload Generator (development and unit tests ONLY).
+# Conference results are produced exclusively from real block-I/O traces.
 # ------------------------------------------------------------------------------
 synthetic_workload:
-  total_requests: 5000
+  total_requests: 50000
   lba_range_min: 0
-  lba_range_max: 500
+  # 1536 blocks = 75% of the 2048-block raw capacity above. Hot/cold separation
+  # only has measurable headroom at high utilization; at the previous 500-block
+  # working set (24%) garbage collection barely runs and WAF stays near 1.0.
+  lba_range_max: 1536
   hot_ratio: 0.20          # 20% of LBAs are hot
-  hot_traffic_ratio: 0.80  # Hot LBAs receive 80% of write traffic (Zipf/Pareto principle)
+  hot_traffic_ratio: 0.80  # Hot LBAs receive 80% of write traffic (Pareto principle)
 
 # ------------------------------------------------------------------------------
-# ML Subsystem & LSTM Hyperparameters (Phase 2 - Phase 4 Placeholders)
+# ML Subsystem & LSTM Hyperparameters
 # ------------------------------------------------------------------------------
 ml:
-  sequence_length: 10      # Number of past rewrite intervals in input window
+  sequence_length: 10      # Number of past rewrite intervals in the input window
   hidden_dim: 64           # LSTM hidden state dimension
   num_layers: 2            # Number of stacked LSTM layers
   dropout: 0.1             # Dropout probability
   batch_size: 64           # Mini-batch training size
   learning_rate: 0.001     # Adam optimizer learning rate
-  epochs: 25               # Training epochs
-  loss_function: "SmoothL1" # MAE / SmoothL1
-  train_split: 0.70        # Train dataset fraction (chronological)
-  val_split: 0.15          # Validation dataset fraction (chronological)
-  test_split: 0.15         # Test dataset fraction (chronological)
-  hot_percentile_cutoff: 30 # LBAs with predicted interval <= 30th percentile labeled HOT
+  epochs: 25               # Maximum training epochs
+  loss_function: "SmoothL1" # SmoothL1 / L1 / MSE
+  train_split: 0.70        # Train fraction (chronological)
+  val_split: 0.15          # Validation fraction (chronological)
+  test_split: 0.15         # Test fraction (chronological)
+  hot_percentile_cutoff: 30 # Predicted interval <= 30th train-set percentile => HOT
