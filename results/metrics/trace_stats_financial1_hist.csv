@@ -1,0 +1,12 @@
+trace_name,interval_bucket,count,fraction
+financial1,"[1,2)",6698,0.033869
+financial1,"[2,4)",16336,0.082604
+financial1,"[4,8)",19634,0.099281
+financial1,"[8,16)",27605,0.139587
+financial1,"[16,32)",31867,0.161138
+financial1,"[32,64)",28424,0.143728
+financial1,"[64,128)",14917,0.075429
+financial1,"[128,256)",9284,0.046945
+financial1,"[256,512)",5429,0.027452
+financial1,"[512,1024)",3992,0.020186
+financial1,"[1024,inf)",33576,0.16978

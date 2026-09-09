@@ -1,0 +1,7 @@
+model,dataset,param_count,latency_ms_per_batch,throughput_pred_per_s,peak_infer_mem_mb,artifact_bytes,waf
+STAT_ML,synthetic_zipf,8938,37.7045,1647.0,0.005,578373,1.0488
+LSTM_SMARTGC,synthetic_zipf,53569,5.8755,10569.3,0.003,219478,1.0468
+LSTM_ATTN_SMARTGC,synthetic_zipf,55745,8.5267,7283.0,0.006,230117,1.0072
+STAT_ML,financial1,12054,39.8886,1602.0,0.004,747331,1.221273
+LSTM_SMARTGC,financial1,53569,6.1398,10407.6,0.003,219482,1.218356
+LSTM_ATTN_SMARTGC,financial1,55745,9.1363,6994.1,0.003,230119,1.242565

@@ -1,0 +1,2 @@
+trace_name,events,writes,reads,write_ratio,unique_lbas,unique_written_lbas,rewrites,rewrite_fraction,rewrite_interval_mean,rewrite_interval_median,rewrite_interval_p90,top20pct_lba_write_share,mean_writes_per_lba,max_writes_per_lba
+financial1,400000,287704,112296,0.71926,115389,89942,197762,0.68738,5571.3754,29.0,15915.0,0.599109,3.1988,8148
