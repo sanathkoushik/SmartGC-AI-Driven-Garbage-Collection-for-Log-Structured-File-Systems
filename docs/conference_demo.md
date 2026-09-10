@@ -12,6 +12,18 @@ the live numbers; the tables below say which file each one comes from.
 
 ## Running the demo
 
+**On stage, use the fast one.** It reads only the results a completed run
+already wrote - it trains nothing and simulates nothing, so it finishes in about
+a second and has nothing to fail:
+
+```powershell
+pwsh scripts/conference_demo.ps1
+pwsh scripts/conference_demo.ps1 -Target msr_src2_0 -Utilization 85
+```
+
+The live version re-runs all three placement policies in front of the audience,
+which is more convincing but takes about a minute and needs the trace present:
+
 ```bash
 python scripts/conference_demo.py
 ```
@@ -278,6 +290,7 @@ Every failure path names the command that fixes it. In order of likelihood:
 
 | Symptom | Fix |
 | :--- | :--- |
+| Anything at all goes wrong live | `pwsh scripts/conference_demo.ps1` - reads committed results only |
 | "results/dataset_roles.json is missing" | `python experiments/run_all.py --stages normalize inventory` |
 | "has not been normalized" | `python -m ml.preprocessing.normalize --discover` |
 | "no trained model for ..." | `python experiments/run_all.py` |

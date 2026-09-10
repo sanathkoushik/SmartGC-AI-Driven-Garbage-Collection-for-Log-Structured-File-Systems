@@ -218,6 +218,14 @@ python experiments/analyze_results.py
 
 ## 6. Demonstration
 
+Fast, reads only generated results (no training, no simulation):
+
+```powershell
+pwsh scripts/conference_demo.ps1
+```
+
+Live, re-runs the three placement policies:
+
 ```bash
 python scripts/conference_demo.py
 python scripts/conference_demo.py --trace msr_proj_0 --utilization 0.85
@@ -229,7 +237,24 @@ instead of printing a number.
 
 ---
 
-## 7. Tests
+## 7. Audit
+
+```bash
+python experiments/audit.py            # report
+python experiments/audit.py --strict   # non-zero exit on any failure
+```
+
+`tests/test_leakage.py` checks the *code* obeys the methodology; this checks the
+*artefacts a run produced* do. It verifies publisher checksums, that targets were
+held out of pretraining, that every approach for a target shares one sequence
+length and one test split, that every policy group replayed an identical
+workload, the `physical == logical + gc_copied` identity, and that no policy
+collapsed to an all-hot or all-cold labelling. Three defects in this project were
+found this way, each of which had passed the unit tests.
+
+---
+
+## 8. Tests
 
 ```bash
 python scripts/build_simulator.py --test     # C++ suite
@@ -243,7 +268,7 @@ skip until a run has produced them.
 
 ---
 
-## 8. What determines a result
+## 9. What determines a result
 
 | Input | Where it is fixed |
 | :--- | :--- |
