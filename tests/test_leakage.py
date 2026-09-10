@@ -207,3 +207,63 @@ def test_hyperparameters_were_selected_on_validation_only():
     assert "validation" in payload["selection_criterion"].lower()
     assert "test" not in payload["selection_criterion"].lower().replace("test data not used", "")
     assert payload["val_mae_us"] > 0
+
+
+def test_rule_threshold_uses_the_statistic_the_rule_computes():
+    """Regression: the heuristic's cutoff must match its own statistic.
+
+    The rule classifies on a running mean of an LBA's intervals; the model is
+    trained on next-interval targets. Those distributions differ by orders of
+    magnitude, so thresholding the rule with the model's cutoff made it label
+    almost nothing HOT and quietly degenerate into "separate by how much history
+    a block has" rather than by temperature.
+    """
+    from ml.evaluation.baselines import rule_statistic_over_training
+
+    # Many LBAs with different characteristic rates, so their running means
+    # spread out and a percentile of them is meaningful. A fixture where every
+    # LBA shares one interval would make every running mean identical and the
+    # percentile degenerate.
+    rng = np.random.default_rng(0)
+    periods = np.geomspace(10, 100_000, num=40)
+    events: list[tuple[int, int]] = []
+    for lba, period in enumerate(periods):
+        clock = int(rng.integers(0, 1000))
+        for _ in range(30):
+            clock += int(period * rng.uniform(0.8, 1.2))
+            events.append((clock, lba))
+    events.sort()
+    timestamps = np.array([t for t, _ in events], dtype=np.int64)
+    lbas = np.array([l for _, l in events])
+
+    observed = rule_statistic_over_training(lbas, timestamps, min_history=5,
+                                            train_fraction=0.7)
+    assert observed.size > 0
+    # The statistic is a running mean of intervals, so it lives on the scale of
+    # the intervals themselves.
+    assert observed.min() > 0
+
+    threshold = float(np.percentile(observed, 30.0))
+    hot_fraction = float(np.mean(observed <= threshold))
+    # A p30 cutoff of the rule's own statistic must label roughly 30% hot. The
+    # bug this guards against produced 2 hot classifications out of 550,987.
+    assert 0.15 <= hot_fraction <= 0.45, hot_fraction
+
+    # And it must not look at anything past the training fraction.
+    longer = rule_statistic_over_training(lbas, timestamps, min_history=5,
+                                          train_fraction=1.0)
+    assert longer.size > observed.size
+
+
+def test_rule_threshold_only_reads_the_training_period():
+    from ml.evaluation.baselines import rule_statistic_over_training
+
+    lbas = np.array([1] * 100)
+    timestamps = np.arange(1, 101, dtype=np.int64) * 10
+    # Corrupting the last 30% must not change a threshold derived from the first 70%.
+    poisoned_timestamps = timestamps.copy()
+    poisoned_timestamps[70:] = np.arange(1, 31) * 10_000_000
+
+    a = rule_statistic_over_training(lbas, timestamps, 5, 0.7)
+    b = rule_statistic_over_training(lbas, poisoned_timestamps, 5, 0.7)
+    assert np.allclose(a, b)

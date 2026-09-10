@@ -1,0 +1,127 @@
+{
+  "config": {
+    "ml": {
+      "batch_size": 64,
+      "dropout": 0.1,
+      "early_stopping_patience": 5,
+      "epochs": 25,
+      "grad_clip_norm": 1.0,
+      "hidden_dim": 64,
+      "hot_percentile_cutoff": 30,
+      "learning_rate": 0.001,
+      "loss_function": "SmoothL1",
+      "min_sequences_per_trace": 200,
+      "num_layers": 2,
+      "sequence_length": 10,
+      "test_split": 0.15,
+      "train_split": 0.7,
+      "val_split": 0.15
+    },
+    "preprocessing": {
+      "max_blocks_per_request": 2048,
+      "max_offset_bytes": 1125899906842624,
+      "max_out_of_order_fraction": 0.01
+    },
+    "random_seed": 42,
+    "simulator": {
+      "block_size_bytes": 4096,
+      "blocks_per_segment": 64,
+      "gc_free_segments_threshold": 2,
+      "gc_policy": "GREEDY",
+      "gc_reserved_segments": 2,
+      "gc_separate_stream": true,
+      "placement_policy": "MIXED",
+      "total_segments": 32
+    },
+    "source_path": "C:\\Users\\Tarun\\SmartGC-AI-Driven-Garbage-Collection-for-Log-Structured-File-Systems\\config\\config.yaml"
+  },
+  "config_path": "config/config.yaml",
+  "environment": {
+    "git_commit": "a99d91613fb9e3c4a0af7af0c685d22f1e21007b-dirty",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.12.10",
+    "torch_device": "cpu",
+    "torch_num_threads": 14,
+    "torch_version": "2.14.0+cpu"
+  },
+  "generated_at_utc": "2026-09-10T12:47:26Z",
+  "max_sequences_per_trace": 150000,
+  "max_writes_per_run": 1000000,
+  "notes": [
+    "restricted to --only-targets msr_rsrch_0, msr_src2_0, systor_lun0; not run: systor_lun1, systor_lun3, systor_lun4"
+  ],
+  "only_targets": [
+    "msr_rsrch_0",
+    "msr_src2_0",
+    "systor_lun0"
+  ],
+  "seed": 42,
+  "selected_hyperparameters": {
+    "dropout": 0.1,
+    "hidden_dim": 64,
+    "learning_rate": 0.0005,
+    "num_layers": 2,
+    "sequence_length": 20
+  },
+  "stage_seconds": {
+    "analyze": 44.15700000000652,
+    "simulate": 114.32800000000861
+  },
+  "stages_run": [
+    "simulate",
+    "analyze"
+  ],
+  "total_seconds": 158.48500000001513,
+  "utilizations": [
+    0.7,
+    0.8,
+    0.85
+  ],
+  "workload_roles": {
+    "criteria": {
+      "min_duration_seconds": 3600.0,
+      "min_rewrite_ratio": 0.3,
+      "min_unique_written_lbas": 5000,
+      "min_write_blocks": 200000,
+      "num_targets": 2,
+      "target_rule": "MSR candidates sorted by trace_id; the NUM_TARGETS traces at the middle of that order are held out. Independent of any measured model or WAF result."
+    },
+    "excluded": [
+      {
+        "dataset": "systor",
+        "eligible": false,
+        "reasons": "duration_seconds 3,315 < 3,600",
+        "trace_id": "systor_lun2"
+      },
+      {
+        "dataset": "systor",
+        "eligible": false,
+        "reasons": "write_blocks 17,088 < 200,000; duration_seconds 82 < 3,600",
+        "trace_id": "systor_lun6"
+      }
+    ],
+    "external": [
+      "systor_lun0",
+      "systor_lun1",
+      "systor_lun3",
+      "systor_lun4"
+    ],
+    "pretrain": [
+      "msr_hm_0",
+      "msr_mds_0",
+      "msr_prn_0",
+      "msr_proj_0",
+      "msr_prxy_0",
+      "msr_stg_0",
+      "msr_ts_0",
+      "msr_usr_0",
+      "msr_wdev_0",
+      "msr_web_0"
+    ],
+    "targets": [
+      "msr_rsrch_0",
+      "msr_src2_0"
+    ]
+  }
+}

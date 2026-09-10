@@ -34,12 +34,14 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from ml.config import environment_metadata, load_config                 # noqa: E402
+from ml.evaluation.baselines import rule_threshold_from_training        # noqa: E402
 from ml.preprocessing.sequences import hot_threshold_from_training      # noqa: E402
 from ml.training.common import (                                        # noqa: E402
     DEFAULT_MAX_SEQUENCES_PER_TRACE,
@@ -137,6 +139,29 @@ class Pipeline:
         self.roles = json.loads(path.read_text(encoding="utf-8"))
         return self.roles
 
+    def selected_targets(self) -> list[str]:
+        """Workloads to model and simulate: the frozen targets plus external set.
+
+        `--only-targets` narrows this without touching dataset_roles.json, which
+        records the assignment as it was frozen. The restriction is written to
+        the manifest so a partial run is never mistaken for the full one.
+        """
+        roles = self.roles or self.load_roles()
+        available = list(roles["targets"]) + list(roles["external"])
+        if not self.args.only_targets:
+            return available
+
+        chosen = [name for name in available if name in set(self.args.only_targets)]
+        unknown = sorted(set(self.args.only_targets) - set(available))
+        if unknown:
+            raise ValueError(f"--only-targets names workloads that have no role: {unknown}")
+        skipped = [name for name in available if name not in set(chosen)]
+        if skipped:
+            self.notes.append(
+                "restricted to --only-targets " + ", ".join(chosen)
+                + "; not run: " + ", ".join(skipped))
+        return chosen
+
     # -- stages -------------------------------------------------------------
     def stage_normalize(self) -> None:
         command = [sys.executable, "-m", "ml.preprocessing.normalize", "--discover"]
@@ -200,8 +225,7 @@ class Pipeline:
         self.run(command, "pretrain")
 
     def stage_models(self) -> None:
-        roles = self.roles or self.load_roles()
-        targets = list(roles["targets"]) + list(roles["external"])
+        targets = self.selected_targets()
         if not targets:
             raise RuntimeError("no target or external workloads available")
         hyperparameters = self._resolve_hyperparameters()
@@ -221,15 +245,16 @@ class Pipeline:
                 )
 
     def stage_evaluate(self) -> None:
-        roles = self.roles or self.load_roles()
-        targets = list(roles["targets"]) + list(roles["external"])
+        targets = self.selected_targets()
         self.run([sys.executable, "experiments/evaluate_models.py",
                   "--targets", *targets,
                   "--max-sequences", str(self.max_sequences)], "evaluate")
+        self.run([sys.executable, "experiments/transfer_comparison.py",
+                  "--targets", *targets,
+                  "--max-sequences", str(self.max_sequences)], "transfer comparison")
 
     def stage_predict(self) -> None:
-        roles = self.roles or self.load_roles()
-        targets = list(roles["targets"]) + list(roles["external"])
+        targets = self.selected_targets()
         for trace_id in targets:
             for model_type in MODEL_TYPES:
                 checkpoint = default_output_path(model_type, trace_id)
@@ -241,18 +266,25 @@ class Pipeline:
                           "--checkpoint", str(checkpoint),
                           "--model-version", model_type], "predict")
 
-    def _rule_threshold(self, trace_id: str) -> float:
-        """Hot cutoff for the heuristic, from the target's TRAINING split only."""
-        pool = build_split_pool([trace_id], self.config.ml,
-                                max_sequences=self.max_sequences)
-        if pool.train["targets"].size == 0:
-            raise RuntimeError(f"{trace_id} has no training split for the rule threshold")
-        return hot_threshold_from_training(pool.train["targets"],
-                                           self.config.ml.hot_percentile_cutoff)
+    def _rule_threshold(self, trace_id: str, min_history: int) -> float:
+        """Hot cutoff for the heuristic, from the target's TRAINING period only.
+
+        Derived from the *running-mean* statistic the C++ rule computes, not from
+        the next-interval targets the LSTM is trained on. Those distributions
+        differ by orders of magnitude, and reusing the model's threshold made the
+        rule label almost nothing HOT and degenerate into "separate by how much
+        history a block has". Same percentile, same training-only rule, applied
+        to the statistic actually being thresholded.
+        """
+        return rule_threshold_from_training(
+            normalized_trace_path(trace_id),
+            min_history=min_history,
+            train_fraction=self.config.ml.train_split,
+            percentile=self.config.ml.hot_percentile_cutoff,
+            max_writes=self.max_writes)
 
     def stage_simulate(self) -> None:
-        roles = self.roles or self.load_roles()
-        targets = list(roles["targets"]) + list(roles["external"])
+        targets = self.selected_targets()
         simulator = find_simulator()
         simulator_config = self.config.simulator
 
@@ -269,7 +301,8 @@ class Pipeline:
                 continue
             distinct, write_count = distinct_written_lbas(trace_id, self.max_writes)
             dataset = trace_id.split("_", 1)[0]
-            rule_threshold = self._rule_threshold(trace_id)
+            rule_min_history = self._resolve_hyperparameters()["sequence_length"]
+            rule_threshold = self._rule_threshold(trace_id, rule_min_history)
             print(f"\n=== {trace_id}: {write_count:,} writes, {distinct:,} distinct LBAs, "
                   f"rule threshold {rule_threshold:,.0f} us ===")
 
@@ -299,8 +332,7 @@ class Pipeline:
                          "simulate MIXED")
                 self.run(base + ["--placement", "RULE_BASED", "--model-type", "rule",
                                  "--rule-threshold-us", f"{rule_threshold:.6f}",
-                                 "--rule-min-history",
-                                 str(self._resolve_hyperparameters()["sequence_length"]),
+                                 "--rule-min-history", str(rule_min_history),
                                  "--report-json", str(reports_dir / f"{tag}__RULE_BASED.json")],
                          "simulate RULE_BASED")
 
@@ -346,6 +378,7 @@ class Pipeline:
             "selected_hyperparameters": self.selected_hyperparameters,
             "workload_roles": self.roles,
             "utilizations": list(self.utilizations),
+            "only_targets": list(self.args.only_targets) if self.args.only_targets else None,
             "max_writes_per_run": self.max_writes,
             "max_sequences_per_trace": self.max_sequences,
             "environment": environment_metadata(),
@@ -373,6 +406,10 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--max-writes", type=int, default=2_000_000,
                         help="cap write requests replayed per simulation (0 = whole trace)")
     parser.add_argument("--utilizations", type=float, nargs="*", default=list(DEFAULT_UTILIZATIONS))
+    parser.add_argument("--only-targets", nargs="*", default=None,
+                        help="restrict modelling/simulation to these workloads; the frozen "
+                             "role assignment is left untouched and the restriction is "
+                             "recorded in the manifest")
     parser.add_argument("--append-metrics", action="store_true",
                         help="append to results/metrics/comparison.csv instead of replacing it")
     parser.add_argument("--quick", action="store_true",

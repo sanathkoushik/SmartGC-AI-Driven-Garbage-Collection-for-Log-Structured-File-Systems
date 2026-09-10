@@ -30,7 +30,7 @@ import pandas as pd                                                     # noqa: 
 from ml.config import load_config                                       # noqa: E402
 from ml.training.common import build_split_pool, load_checkpoint, normalized_trace_path  # noqa: E402
 from ml.training.finetune import MODEL_TYPES, default_output_path       # noqa: E402
-from ml.preprocessing.sequences import hot_threshold_from_training      # noqa: E402
+from ml.evaluation.baselines import rule_threshold_from_training        # noqa: E402
 from experiments.run_all import distinct_written_lbas, find_simulator, size_device  # noqa: E402
 
 RESULTS_DIR = REPO_ROOT / "results"
@@ -169,9 +169,13 @@ def main(argv: Iterable[str] | None = None) -> int:
           f"({distinct / capacity_blocks:.1%} actual)")
 
     # ---- run every policy on the identical workload -----------------------
-    pool = build_split_pool([trace_id], config.ml)
-    rule_threshold = hot_threshold_from_training(pool.train["targets"],
-                                                 config.ml.hot_percentile_cutoff)
+    # The heuristic's cutoff comes from the statistic the heuristic computes,
+    # over the training period only - not from the model's next-interval targets.
+    rule_threshold = rule_threshold_from_training(
+        trace_path, min_history=sequence_length,
+        train_fraction=config.ml.train_split,
+        percentile=config.ml.hot_percentile_cutoff,
+        max_writes=args.max_writes)
 
     reports_dir = RESULTS_DIR / "metrics" / "demo"
     reports_dir.mkdir(parents=True, exist_ok=True)
