@@ -26,6 +26,9 @@ add_library(simulator_core STATIC
     src/segment.cpp
     src/lfs_simulator.cpp
     src/synthetic_workload.cpp
+    src/trace_reader.cpp
+    src/prediction_reader.cpp
+    src/rule_based_classifier.cpp
 )
 
 target_include_directories(simulator_core PUBLIC
@@ -44,6 +47,7 @@ target_link_libraries(smartgc_sim PRIVATE
 # Simulator Unit Tests
 add_executable(simulator_tests
     tests/test_lfs.cpp
+    tests/test_integration.cpp
 )
 
 target_include_directories(simulator_tests PRIVATE
