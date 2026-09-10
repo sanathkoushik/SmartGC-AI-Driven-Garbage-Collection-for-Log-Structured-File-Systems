@@ -133,10 +133,14 @@ def evaluate_target(trace_id: str,
             print(f"  {model_type:<22} MAE {regression.mae:>14,.0f} us   "
                   f"F1 {classification.f1:.4f}   acc {classification.accuracy:.4f}")
 
-    # Baselines are scored on the pool at the configured sequence length, using
-    # a threshold derived from that pool's own TRAINING targets - the same rule
-    # the models followed, so no baseline gets an unfair look at the test set.
-    pool = pool_for(ml_config.sequence_length)
+    # Baselines are scored at the *models'* sequence length so they share the
+    # identical test split, using a threshold derived from that pool's own
+    # TRAINING targets - the same rule the models followed, so no baseline gets
+    # an unfair look at the test set.
+    model_lengths = {int(row["sequence_length"]) for row in rows if row["family"] == "lstm"}
+    baseline_length = (sorted(model_lengths)[0] if model_lengths
+                       else ml_config.sequence_length)
+    pool = pool_for(baseline_length)
     if pool.test["targets"].size and pool.train["targets"].size:
         baseline_threshold = hot_threshold_from_training(pool.train["targets"],
                                                          ml_config.hot_percentile_cutoff)
@@ -149,7 +153,7 @@ def evaluate_target(trace_id: str,
                                                     scores=-predicted)
             rows.append({
                 "trace": trace_id, "predictor": name, "family": "baseline",
-                "sequence_length": ml_config.sequence_length,
+                "sequence_length": baseline_length,
                 "test_samples": regression.n,
                 "mae_us": regression.mae, "rmse_us": regression.rmse,
                 "median_abs_error_us": regression.median_absolute_error,

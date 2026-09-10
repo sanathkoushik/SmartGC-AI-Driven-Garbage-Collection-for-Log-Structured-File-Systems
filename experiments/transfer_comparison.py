@@ -86,6 +86,20 @@ def _row(**kwargs: Any) -> dict[str, Any]:
     return row
 
 
+def _model_sequence_length(trace_id: str, fallback: int) -> int:
+    """Sequence length the trained models for `trace_id` use.
+
+    Read from a checkpoint rather than from config.yaml, because the length is
+    chosen by the hyperparameter search and the config default may differ.
+    """
+    for model_type in MODEL_TYPES:
+        checkpoint = default_output_path(model_type, trace_id)
+        if checkpoint.is_file():
+            model, _, _ = load_checkpoint(checkpoint)
+            return int(model.hyperparameters.sequence_length)
+    return fallback
+
+
 def compare_target(trace_id: str,
                    config_path: Path | None = None,
                    max_sequences: int | None = DEFAULT_MAX_SEQUENCES_PER_TRACE,
@@ -113,7 +127,13 @@ def compare_target(trace_id: str,
         return pools[sequence_length]
 
     # ---- 1. non-learned baselines ----------------------------------------
-    base_pool = pool_for(ml_config.sequence_length)
+    # Scored at the *models'* sequence length, so every approach in this table
+    # sees the identical test split. Building the baseline pool at the config
+    # default instead would silently compare them on a different set of samples:
+    # a different window length yields a different number of sequences and so a
+    # different chronological split.
+    model_sequence_length = _model_sequence_length(trace_id, ml_config.sequence_length)
+    base_pool = pool_for(model_sequence_length)
     if base_pool.test["targets"].size and base_pool.train["targets"].size:
         # Same rule the models follow: the cutoff comes from TRAINING targets.
         threshold = hot_threshold_from_training(base_pool.train["targets"],
@@ -132,7 +152,7 @@ def compare_target(trace_id: str,
                 finetuned_on="none (no training of any kind)",
                 finetune_portion="n/a", finetune_samples=0,
                 test_portion=test_portion,
-                sequence_length=ml_config.sequence_length,
+                sequence_length=model_sequence_length,
                 train_samples=base_pool.sizes["train"], val_samples=base_pool.sizes["val"],
                 test_samples=base_pool.sizes["test"],
                 training_seconds=0.0, parameter_count=0,

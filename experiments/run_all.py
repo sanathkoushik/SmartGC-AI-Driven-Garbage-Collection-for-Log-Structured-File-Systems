@@ -50,6 +50,7 @@ from ml.training.common import (                                        # noqa: 
     build_split_pool,
     normalized_trace_path,
 )
+from ml.models.lstm import LstmHyperparameters                          # noqa: E402
 from ml.training.finetune import MODEL_TYPES, adapt_to_target, default_output_path  # noqa: E402
 
 ALL_STAGES = ("normalize", "inventory", "tune", "pretrain", "models",
@@ -238,6 +239,15 @@ class Pipeline:
                     checkpoint_path=None if model_type == "scratch" else PRETRAINED_PATH,
                     config_path=self.args.config,
                     max_sequences=self.max_sequences,
+                    # The scratch model gets the architecture the search chose,
+                    # so all three variants share a sequence length and therefore
+                    # an identical test split.
+                    hyperparameters=(LstmHyperparameters(
+                        sequence_length=hyperparameters["sequence_length"],
+                        hidden_dim=hyperparameters["hidden_dim"],
+                        num_layers=hyperparameters["num_layers"],
+                        dropout=hyperparameters["dropout"],
+                    ) if model_type == "scratch" else None),
                     learning_rate=(hyperparameters["learning_rate"]
                                    if model_type == "scratch" else None),
                     seed=self.seed,

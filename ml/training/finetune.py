@@ -63,6 +63,7 @@ def adapt_to_target(trace_id: str,
                     config_path: Path | None = None,
                     output_path: Path | None = None,
                     finetune_fraction: float = 1.0,
+                    hyperparameters: LstmHyperparameters | None = None,
                     learning_rate: float | None = None,
                     epochs: int | None = None,
                     max_sequences: int | None = DEFAULT_MAX_SEQUENCES_PER_TRACE,
@@ -94,7 +95,12 @@ def adapt_to_target(trace_id: str,
             )
     else:
         base_model, base_scaler = None, None
-        hyperparameters = LstmHyperparameters(
+        # The scratch model must use the *selected* architecture, not the
+        # config.yaml defaults. Training it at a different sequence length than
+        # the pretrained variants would confound the comparison twice over: a
+        # different model AND a different number of sequences, hence a different
+        # chronological test split.
+        hyperparameters = hyperparameters or LstmHyperparameters(
             sequence_length=ml_config.sequence_length,
             hidden_dim=ml_config.hidden_dim,
             num_layers=ml_config.num_layers,
@@ -217,6 +223,10 @@ def main(argv: Iterable[str] | None = None) -> int:
                         help="evaluate the checkpoint on the target without fine-tuning")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--sequence-length", type=int, default=None)
+    parser.add_argument("--hidden-dim", type=int, default=None)
+    parser.add_argument("--num-layers", type=int, default=None)
+    parser.add_argument("--dropout", type=float, default=None)
     parser.add_argument("--finetune-fraction", type=float, default=1.0,
                         help="fraction of the target's training split used for adaptation")
     parser.add_argument("--learning-rate", type=float, default=None)
@@ -234,9 +244,22 @@ def main(argv: Iterable[str] | None = None) -> int:
     else:
         model_type = "pretrained_finetuned"
 
+    overrides = None
+    if any(v is not None for v in (args.sequence_length, args.hidden_dim,
+                                   args.num_layers, args.dropout)):
+        from ml.config import load_config as _load
+        defaults = _load(args.config).ml
+        overrides = LstmHyperparameters(
+            sequence_length=args.sequence_length or defaults.sequence_length,
+            hidden_dim=args.hidden_dim or defaults.hidden_dim,
+            num_layers=args.num_layers or defaults.num_layers,
+            dropout=defaults.dropout if args.dropout is None else args.dropout,
+        )
+
     adapt_to_target(args.trace, model_type, checkpoint_path=args.checkpoint,
                     config_path=args.config, output_path=args.output,
                     finetune_fraction=args.finetune_fraction,
+                    hyperparameters=overrides,
                     learning_rate=args.learning_rate, epochs=args.epochs,
                     max_sequences=args.max_sequences, refit_scaler=args.refit_scaler,
                     seed=args.seed, device_preference=args.device)
