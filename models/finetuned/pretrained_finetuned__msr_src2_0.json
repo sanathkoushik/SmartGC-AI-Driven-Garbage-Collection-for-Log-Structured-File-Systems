@@ -1,0 +1,174 @@
+{
+  "batch_size": 64,
+  "best_epoch": 13,
+  "best_val_loss": 0.06728961838384469,
+  "checkpoint": "models/finetuned/pretrained_finetuned__msr_src2_0.pt",
+  "config_source": "C:\\Users\\Tarun\\SmartGC-AI-Driven-Garbage-Collection-for-Log-Structured-File-Systems\\config\\config.yaml",
+  "device": "cpu",
+  "early_stopped": true,
+  "environment": {
+    "git_commit": "9a3a6844a2f8d0b1fdbde7c0d74122e80ff15058-dirty",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.12.10",
+    "torch_device": "cpu",
+    "torch_num_threads": 14,
+    "torch_version": "2.14.0+cpu"
+  },
+  "epochs_run": 18,
+  "finetune_fraction_of_train_split": 1.0,
+  "hot_percentile_cutoff": 30,
+  "hot_threshold_microseconds": 60.0,
+  "hyperparameters": {
+    "dropout": 0.1,
+    "hidden_dim": 64,
+    "num_layers": 2,
+    "sequence_length": 20
+  },
+  "learning_rate": 0.0001,
+  "loss_function": "SmoothL1",
+  "max_epochs": 25,
+  "max_sequences_per_trace": 150000,
+  "normalization": {
+    "fitted": true,
+    "mean": 13.487210273742676,
+    "std": 5.744648456573486
+  },
+  "optimizer": "AdamW",
+  "parameter_count": 50497,
+  "pretrain_traces": [
+    "msr_hm_0",
+    "msr_mds_0",
+    "msr_prn_0",
+    "msr_proj_0",
+    "msr_prxy_0",
+    "msr_stg_0",
+    "msr_ts_0",
+    "msr_usr_0",
+    "msr_wdev_0",
+    "msr_web_0"
+  ],
+  "refit_scaler": false,
+  "samples": {
+    "test": 22500,
+    "train": 105000,
+    "used_for_adaptation": 105000,
+    "val": 22500
+  },
+  "seed": 42,
+  "source_checkpoint": "models/pretrained/msr_pretrained.pt",
+  "split_ratios": {
+    "test": 0.15,
+    "train": 0.7,
+    "val": 0.15
+  },
+  "stage": "pretrained_finetuned",
+  "target_trace": "msr_src2_0",
+  "test_metrics_microseconds": {
+    "mae": 91220866.64711241,
+    "mae_log1p": 0.9734853112634734,
+    "median_absolute_error": 2326937.281278655,
+    "n": 22500,
+    "rmse": 586625235.7271336
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.06481949973901113,
+      "val_loss": 0.07322600761685107
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.059261726196606954,
+      "val_loss": 0.07147831242978572
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.05716619041363398,
+      "val_loss": 0.07067343995173772
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.05532707303833394,
+      "val_loss": 0.06984819670584466
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.053874965674252734,
+      "val_loss": 0.06892293380300205
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.05291906052033107,
+      "val_loss": 0.06874795776473151
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.05207324276282674,
+      "val_loss": 0.06884913134541776
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.05107642421779179,
+      "val_loss": 0.06827951835393906
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.05053356933636325,
+      "val_loss": 0.06804833678934309
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.04989774886454855,
+      "val_loss": 0.06846483726501465
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.049270334789015,
+      "val_loss": 0.06775620325869984
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.04885772718432404,
+      "val_loss": 0.06823191229965951
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.048196100088953975,
+      "val_loss": 0.06728961838384469
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.04782327960275468,
+      "val_loss": 0.06871369834509161
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.04749094422842775,
+      "val_loss": 0.06810975070827537
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.04702215210387395,
+      "val_loss": 0.0680899303128322
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.046350533814941135,
+      "val_loss": 0.06778069943851894
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.0459350347555819,
+      "val_loss": 0.0682191987676753
+    }
+  ],
+  "training_seconds": 362.8280000000086,
+  "validation_metrics_microseconds": {
+    "mae": 80564288.83994347,
+    "mae_log1p": 0.9916176990730384,
+    "median_absolute_error": 2326945.281278655,
+    "n": 22500,
+    "rmse": 804249184.1932431
+  }
+}

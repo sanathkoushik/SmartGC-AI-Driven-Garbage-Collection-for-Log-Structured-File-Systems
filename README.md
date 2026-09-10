@@ -241,7 +241,50 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
 ```
 
-(Use `.venv/bin/python` on Linux and macOS.) The models are small enough to train on CPU; a GPU is used if present but is not required.
+(Use `.venv/bin/python` on Linux and macOS.) The model is small enough to train
+on CPU; a GPU is used if present but is not required.
+
+---
+
+## Running the Pipeline
+
+```bash
+python scripts/download_datasets.py --dataset all    # real traces, no form
+python scripts/verify_datasets.py                    # publisher checksums
+python scripts/build_simulator.py --test             # build + C++ tests
+python experiments/run_all.py                        # everything
+```
+
+`run_all.py` runs nine stages in order — `normalize`, `inventory`, `tune`,
+`pretrain`, `models`, `evaluate`, `predict`, `simulate`, `analyze` — and writes
+`results/final/experiment_manifest.json` recording the git commit, configuration,
+seed, workload roles, caps and library versions. Individual stages:
+
+```bash
+python experiments/run_all.py --stages simulate analyze
+python experiments/run_all.py --quick                # smoke test, NOT reportable
+```
+
+Per-stage commands, and how to run each module directly, are in
+[`docs/reproducibility.md`](docs/reproducibility.md).
+
+### Demonstration
+
+```bash
+python scripts/conference_demo.py
+```
+
+Replays one held-out workload through all three placement policies and prints the
+measured comparison. Every number comes from the run it just performed; if an
+artefact is missing it names the command that produces it.
+
+### Tests
+
+```bash
+python scripts/build_simulator.py --test    # C++
+python -m pytest tests/ -q                  # Python
+python -m pytest tests/test_leakage.py -v   # the leakage audit alone
+```
 
 ---
 

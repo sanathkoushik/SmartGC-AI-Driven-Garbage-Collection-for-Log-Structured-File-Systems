@@ -1,0 +1,26 @@
+{
+  "configurations_evaluated": 12,
+  "results_path": "results/ml/hyperparameter_search.csv",
+  "selected": {
+    "dropout": 0.1,
+    "hidden_dim": 64,
+    "learning_rate": 0.0005,
+    "num_layers": 2,
+    "sequence_length": 20
+  },
+  "selection_criterion": "lowest validation MAE (microseconds); test data not used",
+  "traces": [
+    "msr_hm_0",
+    "msr_mds_0",
+    "msr_prn_0",
+    "msr_proj_0",
+    "msr_prxy_0",
+    "msr_stg_0",
+    "msr_ts_0",
+    "msr_usr_0",
+    "msr_wdev_0",
+    "msr_web_0"
+  ],
+  "val_mae_us": 25590130.645589154,
+  "val_rmse_us": 185447809.03696766
+}
