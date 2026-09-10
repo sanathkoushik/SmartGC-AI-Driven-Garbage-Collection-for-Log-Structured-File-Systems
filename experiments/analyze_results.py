@@ -96,13 +96,29 @@ def configure_matplotlib() -> None:
     })
 
 
+#: Conference-facing aliases for the four headline figures. The same figure is
+#: written under a stable name so slides and docs can reference it without
+#: depending on the numbering used to order the full set.
+FINAL_PLOT_ALIASES = {
+    "15_waf_by_policy.png": "final_waf_comparison.png",
+    "16_valid_migrations.png": "final_gc_migrations.png",
+    "09_mae_comparison.png": "final_prediction_comparison.png",
+    "14_transfer_learning_comparison.png": "final_transfer_learning.png",
+}
+
+
 def save(fig: plt.Figure, name: str) -> Path:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     path = PLOTS_DIR / name
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
+    alias = FINAL_PLOT_ALIASES.get(name)
+    if alias:
+        fig.savefig(PLOTS_DIR / alias, bbox_inches="tight")
+        print(f"  wrote {path.relative_to(REPO_ROOT)}  (also as {alias})")
+    else:
+        print(f"  wrote {path.relative_to(REPO_ROOT)}")
     plt.close(fig)
-    print(f"  wrote {path.relative_to(REPO_ROOT)}")
     return path
 
 
@@ -692,12 +708,18 @@ def write_final_tables(ablation: pd.DataFrame, model_comparison: pd.DataFrame,
     if not ablation.empty:
         ablation.to_csv(FINAL_DIR / "final_metrics.csv", index=False)
         print(f"  wrote {(FINAL_DIR / 'final_metrics.csv').relative_to(REPO_ROOT)}")
+        ablation.to_csv(FINAL_DIR / "ablation.csv", index=False)
+        print(f"  wrote {(FINAL_DIR / 'ablation.csv').relative_to(REPO_ROOT)}")
     if not model_comparison.empty:
         model_comparison.to_csv(FINAL_DIR / "model_metrics.csv", index=False)
         print(f"  wrote {(FINAL_DIR / 'model_metrics.csv').relative_to(REPO_ROOT)}")
     if not classification.empty:
         classification.to_csv(FINAL_DIR / "classification_metrics.csv", index=False)
         print(f"  wrote {(FINAL_DIR / 'classification_metrics.csv').relative_to(REPO_ROOT)}")
+    transfer = ML_DIR / "transfer_learning_comparison.csv"
+    if transfer.is_file():
+        pd.read_csv(transfer).to_csv(FINAL_DIR / "transfer_learning_comparison.csv", index=False)
+        print(f"  wrote {(FINAL_DIR / 'transfer_learning_comparison.csv').relative_to(REPO_ROOT)}")
     inventory = RESULTS_DIR / "dataset_inventory.csv"
     if inventory.is_file():
         pd.read_csv(inventory).to_csv(FINAL_DIR / "dataset_inventory.csv", index=False)

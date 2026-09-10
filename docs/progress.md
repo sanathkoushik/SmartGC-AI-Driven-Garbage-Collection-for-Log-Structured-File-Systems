@@ -116,66 +116,97 @@ Selected: `sequence_length` 20, `hidden_dim` 64, 2 layers, dropout 0.1, lr 5e-4.
 
 ## Phase 5 — Transfer Learning: the Four-Way Comparison
 
-All four approaches scored on the **same** held-out chronological test split per target (final 15% of the trace). Full table with provenance: `results/ml/transfer_learning_comparison.csv`.
+All four approaches scored on the **same** held-out chronological test split per
+target, at the **same** sequence length (20). Full table with provenance:
+`results/final/transfer_learning_comparison.csv`.
 
 | Target | Approach | MAE (µs) | RMSE (µs) | MAE log1p | F1 |
 | :--- | :--- | ---: | ---: | ---: | ---: |
-| `msr_rsrch_0` | best baseline (`median_interval`) | 127,907,767 | 995,424,552 | 4.2794 | 0.2348 |
-| | LSTM from scratch | 121,085,055 | 952,439,480 | 1.0748 | 0.8800 |
+| `msr_rsrch_0` | best baseline (`median_interval`) | 81,324,630 | 797,309,131 | 4.3176 | 0.2483 |
+| | LSTM from scratch | 73,700,829 | 773,057,650 | 1.0426 | 0.8697 |
 | | Pretrained, no fine-tuning | 70,564,234 | 775,308,641 | 1.0069 | 0.8473 |
 | | **Pretrained + fine-tuned** | **70,487,142** | **770,871,763** | **0.9507** | **0.8936** |
-| `msr_src2_0` | best baseline (`median_interval`) | 149,625,578 | 737,595,174 | 4.9126 | 0.2017 |
-| | LSTM from scratch | 162,729,978 | 759,434,109 | 1.1204 | 0.8734 |
+| `msr_src2_0` | best baseline (`median_interval`) | 105,435,156 | 599,196,592 | 5.0188 | 0.2168 |
+| | LSTM from scratch | 96,846,512 | 585,140,913 | 1.0576 | 0.8435 |
 | | Pretrained, no fine-tuning | 94,292,772 | 592,029,702 | 1.2082 | 0.8267 |
 | | **Pretrained + fine-tuned** | **91,220,867** | **586,625,236** | **0.9735** | **0.8952** |
-| `systor_lun0` | best baseline (`median_interval`) | 14,632,278 | 43,509,207 | 1.9662 | 0.5854 |
-| | LSTM from scratch | 13,140,359 | 38,769,274 | 1.1870 | 0.7933 |
+| `systor_lun0` | best baseline (`median_interval`) | 15,353,657 | 39,678,240 | 1.8262 | 0.5241 |
+| | LSTM from scratch | 11,744,917 | 33,364,783 | 1.1170 | 0.7977 |
 | | Pretrained, no fine-tuning | 13,615,229 | 38,874,552 | 1.3614 | 0.7356 |
 | | **Pretrained + fine-tuned** | **11,436,713** | **33,754,339** | **1.1072** | **0.8023** |
 
 **Prediction-level findings (all measured):**
 
-1. **The LSTM beats every baseline decisively** — roughly 4× lower log-space error and 4× higher F1 on the MSR targets. Rewrite intervals *are* predictable, and a sequence model captures far more than a threshold on recent history.
-2. **Pretraining alone does not reliably transfer.** It improves log-space error on `rsrch_0` (−0.068) but *degrades* it on `src2_0` (+0.088) and on `systor_lun0` (+0.174), even while cutting raw MAE ~40%.
-3. **Fine-tuning always helps, and is the best model on every metric for all three targets.** It recovers and exceeds the scratch model in every case (−0.056, −0.235, −0.254 log1p vs pretrained).
-4. The `last_interval` (persistence) baseline is the **worst** predictor of all (log1p 8.15–9.40); `median_interval` is the strongest baseline.
+1. **The LSTM beats every baseline decisively** — roughly 4x lower log-space error
+   and about 3x the hot/cold F1. Rewrite intervals *are* predictable.
+2. **Pretraining alone does not reliably transfer.** It improves log-space error
+   on `msr_rsrch_0` (−0.036 vs scratch) but degrades it on `msr_src2_0` (+0.151)
+   and `systor_lun0` (+0.244).
+3. **Fine-tuning is the best model on every metric for all three targets**, and
+   recovers the loss that un-adapted pretraining causes.
+4. The `last_interval` (persistence) baseline is the **worst** predictor of all;
+   `median_interval` is the strongest baseline.
 
 ---
 
 ## Phase 6/7 — Does Better Prediction Reduce Write Amplification?
 
-45 simulator runs: 3 workloads × 3 utilizations × 5 configurations, each replaying **1,000,000 identical write requests** against identical geometry and seed. Full table: `results/metrics/ablation.csv`.
+45 simulator runs: 3 workloads x 3 utilizations x 5 configurations, each
+replaying **1,000,000 identical write requests** against identical geometry and
+seed. Full table: `results/final/ablation.csv`.
 
 ### Mean change in WAF relative to MIXED
 
 | Configuration | Mean | Best | Worst |
 | :--- | ---: | ---: | ---: |
-| **LSTM pretrained** | **−5.02%** | −13.12% | +0.07% |
-| RULE_BASED | −4.10% | −12.83% | +0.15% |
-| LSTM pretrained+finetuned | −3.53% | −12.07% | +0.12% |
-| LSTM scratch | −3.07% | −8.27% | −0.03% |
+| **LSTM pretrained** | **-5.02%** | -13.12% | +0.07% |
+| LSTM scratch | -4.57% | -12.72% | -0.02% |
+| RULE_BASED | -4.10% | -12.83% | +0.15% |
+| LSTM pretrained+finetuned | -3.53% | -12.07% | +0.12% |
 
-### By utilization
+### Primary workload `msr_rsrch_0`
 
-| Configuration | 70% | 80% | 85% |
-| :--- | ---: | ---: | ---: |
-| LSTM pretrained | −7.7% | −5.1% | −2.4% |
-| RULE_BASED | −7.0% | −3.9% | −1.4% |
-| LSTM pretrained+finetuned | −6.5% | −3.0% | −1.0% |
-| LSTM scratch | −5.8% | −2.5% | −1.8% |
+| Utilization | Policy | WAF | vs MIXED | Valid migrations | GC bytes |
+| ---: | :--- | ---: | ---: | ---: | ---: |
+| 70% | MIXED | 1.2271 | baseline | 227,113 | 930,254,848 |
+| 70% | RULE_BASED | 1.0697 | -12.83% | 69,656 | 285,310,976 |
+| 70% | LSTM scratch | 1.0711 | -12.72% | 71,084 | 291,160,064 |
+| 70% | LSTM pretrained | 1.0661 | -13.12% | 66,110 | 270,786,560 |
+| 70% | LSTM pretrained+finetuned | 1.0790 | -12.07% | 79,015 | 323,645,440 |
+| 80% | MIXED | 1.4201 | baseline | 420,091 | 1,720,692,736 |
+| 80% | RULE_BASED | 1.2864 | -9.41% | 286,394 | 1,173,069,824 |
+| 80% | LSTM scratch | 1.2920 | -9.02% | 291,995 | 1,196,011,520 |
+| 80% | LSTM pretrained | 1.2546 | -11.65% | 254,645 | 1,043,025,920 |
+| 80% | LSTM pretrained+finetuned | 1.3137 | -7.49% | 313,716 | 1,284,980,736 |
+| 85% | MIXED | 1.5884 | baseline | 588,394 | 2,410,061,824 |
+| 85% | RULE_BASED | 1.5290 | -3.74% | 529,024 | 2,166,882,304 |
+| 85% | LSTM scratch | 1.5246 | -4.02% | 524,592 | 2,148,728,832 |
+| 85% | LSTM pretrained | 1.5062 | -5.17% | 506,226 | 2,073,501,696 |
+| 85% | LSTM pretrained+finetuned | 1.5408 | -3.00% | 540,797 | 2,215,104,512 |
 
 ### Storage-level findings — including the negative ones
 
-1. **The chain breaks between prediction and placement.** `pretrained_finetuned` is the *best* predictor on all three workloads (Phase 5) but only the *third best* placement policy (−3.53% mean, against −5.02% for the un-adapted pretrained model). Better rewrite-interval prediction did **not** produce better hot/cold placement here.
-2. **SmartGC's margin over the simple heuristic is modest**: −5.02% vs −4.10% mean, about 0.9 percentage points. The LSTM wins, but a running mean and one comparison gets most of the way there.
-3. **Gains shrink sharply as utilization rises** — the opposite of the intuition that separation matters more under pressure. At 85% every configuration is within 2.4% of the baseline. With little free space, the collector must clean nearly-full segments regardless of how they were separated, so segregation has little room to help.
-4. **External generalization is weak.** On `systor_lun0` no configuration beats MIXED by more than 1.9%, and at 85% utilization several are marginally *worse*. The MSR-pretrained model does not carry a useful placement advantage into a different workload family.
-5. Prediction coverage is partial and measured, not assumed: 49–71% on MSR, 29–34% on SYSTOR. An LBA needs 20 rewrite intervals before it can be scored.
+1. **The chain breaks between prediction and placement.** `pretrained_finetuned`
+   is the best predictor on all three workloads but the fourth-best placement
+   policy (−3.53% mean, against −5.02% for the un-adapted pretrained model).
+2. **SmartGC's margin over the simple heuristic is modest**: −5.02% vs −4.10%
+   mean, about 0.9 percentage points.
+3. **Gains shrink sharply as utilization rises** — the opposite of the intuition
+   that separation matters more under pressure. On `msr_rsrch_0` the best
+   configuration goes from −13.12% at 70% to −5.17% at 85%. With little free
+   space the collector must clean nearly-full segments regardless of how they
+   were separated.
+4. **External generalization is weak.** On `systor_lun0` no configuration beats
+   MIXED by more than 1.9%, and at 85% several are marginally worse.
+5. Prediction coverage is partial and measured, not assumed: 49-71% on MSR,
+   29-34% on SYSTOR. An LBA needs 20 rewrite intervals before it can be scored.
 
-**Overall:** rewrite intervals are strongly predictable and the LSTM predicts them far better than any baseline, but that advantage translates into only a modest and utilization-dependent WAF reduction, and the best-predicting model is not the best-placing model.
+**Overall:** rewrite intervals are strongly predictable and the LSTM predicts them
+far better than any baseline, but that advantage translates into only a modest,
+utilization-dependent WAF reduction, and the best-predicting model is not the
+best-placing model.
 
 ---
-
 ## Defects Found During Validation
 
 Beyond the six Phase-1b engine defects, one methodological defect was found and fixed in this project's own comparison.

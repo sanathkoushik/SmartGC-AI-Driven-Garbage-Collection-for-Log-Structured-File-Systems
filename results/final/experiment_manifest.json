@@ -37,7 +37,7 @@
   },
   "config_path": "config/config.yaml",
   "environment": {
-    "git_commit": "a99d91613fb9e3c4a0af7af0c685d22f1e21007b-dirty",
+    "git_commit": "c2413f3c43b307ca95dd1bb8d9030ef8245e1038-dirty",
     "platform": "Windows-11-10.0.26200-SP0",
     "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
     "python_version": "3.12.10",
@@ -45,10 +45,12 @@
     "torch_num_threads": 14,
     "torch_version": "2.14.0+cpu"
   },
-  "generated_at_utc": "2026-09-10T12:47:26Z",
+  "generated_at_utc": "2026-09-10T13:32:37Z",
   "max_sequences_per_trace": 150000,
   "max_writes_per_run": 1000000,
   "notes": [
+    "restricted to --only-targets msr_rsrch_0, msr_src2_0, systor_lun0; not run: systor_lun1, systor_lun3, systor_lun4",
+    "restricted to --only-targets msr_rsrch_0, msr_src2_0, systor_lun0; not run: systor_lun1, systor_lun3, systor_lun4",
     "restricted to --only-targets msr_rsrch_0, msr_src2_0, systor_lun0; not run: systor_lun1, systor_lun3, systor_lun4"
   ],
   "only_targets": [
@@ -65,14 +67,18 @@
     "sequence_length": 20
   },
   "stage_seconds": {
-    "analyze": 44.15700000000652,
-    "simulate": 114.32800000000861
+    "analyze": 76.39000000001397,
+    "evaluate": 17.5,
+    "predict": 355.65600000001723,
+    "simulate": 107.31299999999464
   },
   "stages_run": [
+    "evaluate",
+    "predict",
     "simulate",
     "analyze"
   ],
-  "total_seconds": 158.48500000001513,
+  "total_seconds": 556.8590000000258,
   "utilizations": [
     0.7,
     0.8,

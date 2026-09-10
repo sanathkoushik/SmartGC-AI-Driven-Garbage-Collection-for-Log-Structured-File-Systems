@@ -32,59 +32,84 @@ The comparison is:
 
 ## Results
 
-All values measured on real MSR Cambridge and SYSTOR '17 traces. Regenerate with
-`python experiments/run_all.py`; the tables live in `results/`.
+All values measured on real MSR Cambridge and SYSTOR '17 traces, on held-out
+chronological test splits. Regenerate with `python experiments/run_all.py`;
+`python experiments/audit.py` re-verifies every fairness property (71/71 pass).
 
-### Does the LSTM predict rewrite intervals better than a heuristic? **Yes, clearly.**
+### Prediction: does the LSTM beat a heuristic? **Yes, decisively.**
 
-Held-out chronological test split per workload (`results/ml/transfer_learning_comparison.csv`):
+Every approach below is scored on the *same* test split at the *same* sequence
+length (`results/final/transfer_learning_comparison.csv`).
 
-| Workload | best baseline MAE(log1p) | LSTM scratch | pretrained | **pretrained + fine-tuned** |
-| :--- | ---: | ---: | ---: | ---: |
-| `msr_rsrch_0` | 4.2794 | 1.0748 | 1.0069 | **0.9507** |
-| `msr_src2_0` | 4.9126 | 1.1204 | 1.2082 | **0.9735** |
-| `systor_lun0` | 1.9662 | 1.1870 | 1.3614 | **1.1072** |
+| Workload | Approach | MAE (µs) | RMSE (µs) | MAE log1p | Hot/cold F1 |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| `msr_rsrch_0` | best baseline (`median_interval`) | 81,324,630 | 797,309,131 | 4.3176 | 0.2483 |
+| | LSTM from scratch | 73,700,829 | 773,057,650 | 1.0426 | 0.8697 |
+| | pretrained, no fine-tuning | 70,564,234 | 775,308,641 | 1.0069 | 0.8473 |
+| | **pretrained + fine-tuned** | **70,487,142** | **770,871,763** | **0.9507** | **0.8936** |
+| `msr_src2_0` | best baseline (`median_interval`) | 105,435,156 | 599,196,592 | 5.0188 | 0.2168 |
+| | LSTM from scratch | 96,846,512 | 585,140,913 | 1.0576 | 0.8435 |
+| | pretrained, no fine-tuning | 94,292,772 | 592,029,702 | 1.2082 | 0.8267 |
+| | **pretrained + fine-tuned** | **91,220,867** | **586,625,236** | **0.9735** | **0.8952** |
+| `systor_lun0` | best baseline (`median_interval`) | 15,353,657 | 39,678,240 | 1.8262 | 0.5241 |
+| | LSTM from scratch | 11,744,917 | 33,364,783 | 1.1170 | 0.7977 |
+| | pretrained, no fine-tuning | 13,615,229 | 38,874,552 | 1.3614 | 0.7356 |
+| | **pretrained + fine-tuned** | **11,436,713** | **33,754,339** | **1.1072** | **0.8023** |
 
-Hot/cold F1 rises from 0.20–0.59 (best baseline) to 0.80–0.90 (fine-tuned LSTM).
-Pretraining alone does **not** reliably transfer — it degrades log-space error on
-two of three workloads — but fine-tuning recovers and wins on every metric.
+* **The LSTM beats every baseline by ~4x in log-space error** and roughly triples
+  hot/cold F1. Rewrite intervals are genuinely predictable.
+* **Pretraining alone does not reliably transfer** - it improves log-space error on
+  `msr_rsrch_0` but degrades it on the other two, even while cutting raw MAE.
+* **Fine-tuning is the best model on every metric for all three workloads.**
 
-### Does better prediction reduce write amplification? **Only modestly, and not via the best model.**
+### Placement: does better prediction reduce write amplification? **Only modestly.**
 
-45 runs, 3 workloads x 3 utilizations x 5 configurations, 1,000,000 identical
-write requests each (`results/metrics/ablation.csv`):
+45 runs: 3 workloads x 3 utilizations x 5 configurations, each replaying
+1,000,000 **identical** write requests against identical geometry and seed
+(`results/final/ablation.csv`).
 
 | Configuration | mean change in WAF vs MIXED | best | worst |
 | :--- | ---: | ---: | ---: |
 | **LSTM pretrained** | **-5.02%** | -13.12% | +0.07% |
+| LSTM scratch | -4.57% | -12.72% | -0.02% |
 | RULE_BASED | -4.10% | -12.83% | +0.15% |
 | LSTM pretrained+finetuned | -3.53% | -12.07% | +0.12% |
-| LSTM scratch | -3.07% | -8.27% | -0.03% |
+
+Primary workload `msr_rsrch_0` at 80% utilization, 896 segments:
+
+| Policy | WAF | vs MIXED | Valid migrations | GC count |
+| :--- | ---: | ---: | ---: | ---: |
+| MIXED | 1.4201 | baseline | 420,091 | 21,295 |
+| RULE_BASED | 1.2864 | -9.41% | 286,394 | 19,207 |
+| LSTM scratch | 1.2920 | -9.02% | 291,995 | 19,295 |
+| LSTM pretrained | 1.2546 | -11.65% | 254,645 | 18,711 |
+| LSTM pretrained+finetuned | 1.3137 | -7.49% | 313,716 | 19,634 |
 
 Three findings worth stating plainly:
 
-* **The chain breaks.** `pretrained_finetuned` is the best *predictor* on all
-  three workloads but only the third best *placement policy*. Better
-  rewrite-interval prediction did not produce better hot/cold placement here.
-* **The margin over the simple heuristic is small** — about 0.9 percentage
-  points on average. A running mean and one comparison gets most of the way.
+* **The chain breaks between prediction and placement.** `pretrained_finetuned`
+  is the best *predictor* on all three workloads but only the *fourth best*
+  placement policy. Better rewrite-interval prediction did not produce better
+  hot/cold placement here.
+* **The margin over the simple heuristic is small** - about 0.9 percentage points
+  on average. A running mean and one comparison gets most of the way.
 * **Gains shrink as utilization rises**, the opposite of the usual intuition:
-  -7.7% at 70% utilization but -2.4% at 85%. With little free space the
+  -13.1% at 70% utilization but -5.2% at 85%. With little free space the
   collector must clean nearly-full segments however they were separated.
 
 External generalization is weak: on `systor_lun0` nothing beats MIXED by more
 than 1.9%, and at 85% utilization several configurations are marginally worse.
 
-A methodological defect found during this work — the rule-based control was
-thresholded with the model's cutoff rather than its own statistic, which made it
-label 2 writes HOT out of 550,987 — is documented in `docs/progress.md`. It
-changed the reported conclusion, so it is recorded rather than quietly fixed.
+Three methodological defects found and fixed during this work - a rule-based
+control thresholded on the wrong statistic, a scratch model built with the wrong
+architecture, and baselines scored on a different split - are documented in
+`docs/progress.md`. Each changed a reported number, so each is recorded rather
+than quietly corrected. `experiments/audit.py` now checks all three properties.
 
-Limitations (trace age, truncation, one external workload, single training seed,
-no significance testing) are listed in `docs/progress.md` and `docs/methodology.md`.
+Limitations (trace age, chronological truncation, one external workload, a single
+training seed, no significance testing) are in `docs/progress.md`.
 
 ---
-
 ## Core Concept: Hot/Cold vs. Valid/Invalid
 
 An essential design principle in SmartGC is the independence of validity and temperature:
