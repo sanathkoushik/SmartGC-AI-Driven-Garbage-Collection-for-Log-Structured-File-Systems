@@ -1,0 +1,46 @@
+{
+  "criteria": {
+    "min_duration_seconds": 3600.0,
+    "min_rewrite_ratio": 0.3,
+    "min_unique_written_lbas": 5000,
+    "min_write_blocks": 200000,
+    "num_targets": 2,
+    "target_rule": "MSR candidates sorted by trace_id; the NUM_TARGETS traces at the middle of that order are held out. Independent of any measured model or WAF result."
+  },
+  "excluded": [
+    {
+      "dataset": "systor",
+      "eligible": false,
+      "reasons": "duration_seconds 3,315 < 3,600",
+      "trace_id": "systor_lun2"
+    },
+    {
+      "dataset": "systor",
+      "eligible": false,
+      "reasons": "write_blocks 17,088 < 200,000; duration_seconds 82 < 3,600",
+      "trace_id": "systor_lun6"
+    }
+  ],
+  "external": [
+    "systor_lun0",
+    "systor_lun1",
+    "systor_lun3",
+    "systor_lun4"
+  ],
+  "pretrain": [
+    "msr_hm_0",
+    "msr_mds_0",
+    "msr_prn_0",
+    "msr_proj_0",
+    "msr_prxy_0",
+    "msr_stg_0",
+    "msr_ts_0",
+    "msr_usr_0",
+    "msr_wdev_0",
+    "msr_web_0"
+  ],
+  "targets": [
+    "msr_rsrch_0",
+    "msr_src2_0"
+  ]
+}

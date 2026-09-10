@@ -47,6 +47,14 @@ MODELS_DIR = REPO_ROOT / "models"
 #: the split relies on.
 DEFAULT_MAX_SEQUENCES_PER_TRACE = 400_000
 
+#: Write events read from a normalized trace before sequences are built. Needed
+#: as well as the sequence cap because the cap is applied *after* construction:
+#: a 25-million-write volume would otherwise materialise a 25-million-row window
+#: array before being trimmed to 400k. A chronological prefix of writes yields a
+#: chronological prefix of samples, so the causal ordering the split relies on is
+#: unaffected.
+DEFAULT_MAX_WRITES_PER_TRACE = 2_000_000
+
 
 def set_deterministic_seed(seed: int) -> None:
     """Seed every generator the pipeline uses and disable nondeterministic kernels."""
@@ -83,16 +91,44 @@ def available_traces(dataset: str | None = None) -> list[str]:
     return names
 
 
+def read_write_prefix(path: Path, max_writes: int | None) -> pd.DataFrame:
+    """Read the first `max_writes` write events of a normalized trace.
+
+    Read in chunks and stopped early: a normalized MSR volume can hold tens of
+    millions of rows and only a chronological prefix is needed.
+    """
+    columns = ["timestamp", "lba", "operation"]
+    if max_writes is None:
+        frame = pd.read_csv(path, usecols=columns)
+        return frame[frame["operation"] == "W"]
+
+    collected: list[pd.DataFrame] = []
+    total = 0
+    for chunk in pd.read_csv(path, usecols=columns, chunksize=1_000_000):
+        writes = chunk[chunk["operation"] == "W"]
+        if total + len(writes) >= max_writes:
+            collected.append(writes.iloc[: max_writes - total])
+            total = max_writes
+            break
+        collected.append(writes)
+        total += len(writes)
+    if not collected:
+        return pd.DataFrame({name: pd.Series(dtype="int64") for name in columns})
+    return pd.concat(collected, ignore_index=True)
+
+
 def load_trace_samples(trace_id: str,
                        sequence_length: int,
                        max_sequences: int | None = DEFAULT_MAX_SEQUENCES_PER_TRACE,
+                       max_writes: int | None = DEFAULT_MAX_WRITES_PER_TRACE,
                        use_cache: bool = True) -> dict[str, np.ndarray]:
     """Build ``(window -> next interval)`` samples for one normalized trace.
 
-    Cached as an .npz keyed by trace and sequence length, because rebuilding
-    from a multi-million-row CSV dominates the runtime of the experiments.
+    Cached as an .npz keyed by trace, sequence length and write cap, because
+    rebuilding from a multi-million-row CSV dominates the experiments' runtime.
     """
-    cache_path = SEQUENCE_CACHE_DIR / f"{trace_id}__L{sequence_length}.npz"
+    cache_key = f"{trace_id}__L{sequence_length}__W{max_writes or 'all'}"
+    cache_path = SEQUENCE_CACHE_DIR / f"{cache_key}.npz"
     if use_cache and cache_path.is_file():
         with np.load(cache_path) as data:
             samples = {key: data[key] for key in ("inputs", "targets", "timestamp", "lba")}
@@ -103,8 +139,7 @@ def load_trace_samples(trace_id: str,
                 f"Normalized trace not found: {path}. "
                 "Run: python -m ml.preprocessing.normalize --discover"
             )
-        frame = pd.read_csv(path, usecols=["timestamp", "lba", "operation"])
-        writes = frame[frame["operation"] == "W"]
+        writes = read_write_prefix(path, max_writes)
         intervals = rewrite_intervals(writes["lba"].to_numpy(),
                                       writes["timestamp"].to_numpy())
         samples = build_sequences(intervals, sequence_length)
@@ -150,7 +185,8 @@ def _concat(parts: Sequence[dict[str, np.ndarray]], sequence_length: int) -> dic
 def build_split_pool(trace_ids: Iterable[str],
                      config: MlConfig,
                      max_sequences: int | None = DEFAULT_MAX_SEQUENCES_PER_TRACE,
-                     sequence_length: int | None = None) -> SplitPool:
+                     sequence_length: int | None = None,
+                     max_writes: int | None = DEFAULT_MAX_WRITES_PER_TRACE) -> SplitPool:
     """Split each trace chronologically, then pool the matching splits.
 
     Splitting before pooling is what keeps the experiment honest across
@@ -162,7 +198,8 @@ def build_split_pool(trace_ids: Iterable[str],
     per_trace: dict[str, dict[str, int]] = {}
 
     for trace_id in trace_ids:
-        samples = load_trace_samples(trace_id, length, max_sequences=max_sequences)
+        samples = load_trace_samples(trace_id, length, max_sequences=max_sequences,
+                                     max_writes=max_writes)
         if samples["targets"].size == 0:
             per_trace[trace_id] = {"train": 0, "val": 0, "test": 0, "total": 0}
             continue

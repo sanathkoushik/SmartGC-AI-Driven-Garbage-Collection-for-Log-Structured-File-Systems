@@ -43,41 +43,90 @@ A mispredicted temperature can cost write amplification; it can never lose or co
 
 ## Datasets
 
-SmartGC is evaluated on **real, public block-level I/O traces**. No conference result is produced from synthetic data; synthetic workloads exist only for unit tests and development, and every simulator run is labelled with the dataset it used.
+SmartGC is evaluated on **real, public block-level I/O traces**. No conference
+result is produced from synthetic data; synthetic workloads exist only for unit
+tests and development, and every simulator run is labelled with the dataset it
+used.
 
-### Primary — MSR Cambridge
+Both datasets download **anonymously over HTTPS with no form, no account and no
+credentials**:
 
-One-week block I/O traces of enterprise servers at Microsoft Research Cambridge, distributed through the **SNIA IOTTA** trace repository (`iotta.snia.org/traces/block-io/388`, split into subtraces `386` and `387`). Per the distribution README, the collection covers **36 traces from 36 volumes on 13 servers**. Each record is:
+```bash
+python scripts/download_datasets.py --dataset all
+python scripts/verify_datasets.py
+```
+
+### Primary — MSR Cambridge (2007)
+
+One-week block I/O traces of enterprise servers at Microsoft Research Cambridge:
+36 volumes across 13 servers, per the distribution README. Records are
 
 ```
 Timestamp,Hostname,DiskNumber,Type,Offset,Size,ResponseTime
 ```
 
-with the timestamp in Windows FILETIME units, the offset in bytes from the start of the logical disk, and the size in bytes. Original authors and required citation: **Narayanan, Donnelly and Rowstron, "Write Off-Loading: Practical Power Management for Enterprise Storage", USENIX FAST '08**.
+with the timestamp in Windows FILETIME units, the offset in bytes from the start
+of the logical disk, and the size in bytes.
 
-### Secondary — FIU
+* **Original data:** Microsoft Research Cambridge.
+* **Citation:** Narayanan, Donnelly and Rowstron, "Write Off-Loading: Practical
+  Power Management for Enterprise Storage", USENIX FAST '08.
+* **Canonical repository:** <https://iotta.snia.org/traces/block-io/388>.
+* **Downloaded from:** the public `cache-datasets` S3 bucket published by the
+  cacheMon group, which holds the **original distribution archives unmodified**.
+* **Integrity:** every volume is verified against `MD5.txt` — the checksum
+  manifest **written by the data's authors** and shipped inside the archive.
 
-Block I/O traces collected at Florida International University, also distributed through SNIA IOTTA (`iotta.snia.org/traces/block-io/390`): the **IODedup** set (`391`, collected 01–21 November 2008) and the **SRCMap** set (`414`). Records are:
+### External generalization — SYSTOR '17 (2016)
 
-```
-[ts in ns] [pid] [process] [lba] [size in 512B blocks] [R|W] [major] [minor] [md5]
-```
+Enterprise virtual desktop infrastructure traces from Fujitsu Laboratories,
+2,706 hourly traces across 6 LUNs. Records are
+`Timestamp,Response,IOType,LUN,Offset,Size`.
 
-FIU is used for **external validation** — to test whether a model pretrained on MSR transfers to a different workload family, rather than being tuned to one dataset.
+* **Citation:** Lee, Kumano, Matsuki, Endo, Fukumoto and Sugawara,
+  "Understanding storage traffic characteristics on enterprise virtual desktop
+  infrastructure", SYSTOR '17.
+* **Canonical repository:** <https://iotta.snia.org/traces/block-io/4928>.
+* **Downloaded from:** the same public bucket.
+
+SYSTOR is used to test whether a model pretrained on MSR transfers to a
+**different workload family, nine years newer** — a stronger generalization test
+than another workload from the same era.
+
+### Why not FIU
+
+FIU traces were the intended secondary dataset and are **not obtainable
+automatically**. All four routes were probed directly on 2026-09-09: SNIA IOTTA
+and the Harvey Mudd mirror both gate bulk downloads behind a form requiring a
+name, e-mail address and organisation; the original FIU host
+(`sylab-srv.cs.fiu.edu`) does not respond; and every download link on the ASU
+VISA Lab trace pages returns HTTP 404.
+
+The FIU parser is implemented and unit-tested against real FIU sample records, so
+files placed in `data/raw/fiu/` are picked up with no code change. The full
+record, including the scored comparison of nine candidate sources, is in
+[`docs/dataset_source_decision.md`](docs/dataset_source_decision.md) and
+[`results/dataset_source_comparison.csv`](results/dataset_source_comparison.csv).
 
 ### Honest caveats
 
-- **These traces are old.** MSR Cambridge was collected in **2007**; the FIU traces in **2008–2009**. SNIA itself files both under "Historical Traces" with the warning that they are over ten years old. They remain the standard public block-I/O corpus for this kind of study, but no claim is made that they represent modern storage workloads.
-- **The bulk downloads are licence-gated.** SNIA requires accepting its Trace Data Files Download License and submitting downloader details through a web form. This repository therefore does **not** automate the download; it documents a manual acquisition path and ships a verifier. The CMU PDL mirror sometimes cited for these traces does not in fact host them, and FIU's original host (`sylab-srv.cs.fiu.edu`) is offline — neither is claimed as a source here.
+* **These traces are old.** MSR Cambridge was collected in **2007** and
+  SYSTOR '17 in **2016**. SNIA files both under "Historical Traces". They remain
+  the standard public block-I/O corpora for this kind of study, but no claim is
+  made that they represent contemporary storage workloads.
+* **The download host is not the data's producer**, and this repository never
+  says otherwise.
+* **No trace data is committed.** Microsoft's `DISCLAIMER.txt` reserves
+  reproduction rights, so the pipeline reproduces the data from documented URLs
+  instead.
 
-Full provenance, subset-selection criteria and preprocessing details: `docs/dataset.md` and `data/README.md` (Phase 2).
-
----
+Full provenance, field semantics and preprocessing: [`data/README.md`](data/README.md)
+and [`docs/dataset.md`](docs/dataset.md).
 
 ## System Architecture & End-to-End Pipeline
 
 ```
-Real block-I/O trace (MSR Cambridge / FIU)
+Real block-I/O trace (MSR Cambridge / SYSTOR '17)
       |
       v
 [Preprocessing & normalization]  -> timestamp,lba,size,operation,trace_id

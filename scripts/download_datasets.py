@@ -87,6 +87,12 @@ class DownloadRecord:
     byte_range: str | None
 
 
+def manifest_path(path: Path) -> str:
+    """Repository-relative path with forward slashes, so the manifest key is
+    identical on Windows and POSIX (verify_datasets.py normalises the same way)."""
+    return str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+
+
 def _human(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if abs(n) < 1024 or unit == "GB":
@@ -282,7 +288,7 @@ def download_msr(session: requests.Session,
                 md5_ok = None
                 if expected:
                     md5_ok = hashlib.md5(destination.read_bytes()).hexdigest() == expected
-                records.append(DownloadRecord("msr", base, str(destination.relative_to(REPO_ROOT)),
+                records.append(DownloadRecord("msr", base, manifest_path(destination),
                                               destination.stat().st_size, sha, expected, md5_ok,
                                               archive, f"{offset}-{offset + size - 1}"))
                 remaining.discard(base)
@@ -306,7 +312,7 @@ def download_msr(session: requests.Session,
                         f"{base}: MD5 does not match the checksum shipped by the data's authors. "
                         "The download was discarded."
                     )
-            records.append(DownloadRecord("msr", base, str(destination.relative_to(REPO_ROOT)),
+            records.append(DownloadRecord("msr", base, manifest_path(destination),
                                           written, sha, expected, md5_ok, archive,
                                           f"{offset}-{offset + size - 1}"))
             remaining.discard(base)
@@ -384,7 +390,7 @@ def download_systor(session: requests.Session,
                     break                      # truncated final member
                 destination.write_bytes(payload)
                 records.append(DownloadRecord(
-                    "systor", base, str(destination.relative_to(REPO_ROOT)), len(payload),
+                    "systor", base, manifest_path(destination), len(payload),
                     hashlib.sha256(payload).hexdigest(), None, None,
                     SYSTOR_ARCHIVE, f"0-{length - 1}"))
         except (tarfile.ReadError, EOFError):
