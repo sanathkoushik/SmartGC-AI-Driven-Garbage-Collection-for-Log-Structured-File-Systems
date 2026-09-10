@@ -30,6 +30,61 @@ The comparison is:
 
 ---
 
+## Results
+
+All values measured on real MSR Cambridge and SYSTOR '17 traces. Regenerate with
+`python experiments/run_all.py`; the tables live in `results/`.
+
+### Does the LSTM predict rewrite intervals better than a heuristic? **Yes, clearly.**
+
+Held-out chronological test split per workload (`results/ml/transfer_learning_comparison.csv`):
+
+| Workload | best baseline MAE(log1p) | LSTM scratch | pretrained | **pretrained + fine-tuned** |
+| :--- | ---: | ---: | ---: | ---: |
+| `msr_rsrch_0` | 4.2794 | 1.0748 | 1.0069 | **0.9507** |
+| `msr_src2_0` | 4.9126 | 1.1204 | 1.2082 | **0.9735** |
+| `systor_lun0` | 1.9662 | 1.1870 | 1.3614 | **1.1072** |
+
+Hot/cold F1 rises from 0.20–0.59 (best baseline) to 0.80–0.90 (fine-tuned LSTM).
+Pretraining alone does **not** reliably transfer — it degrades log-space error on
+two of three workloads — but fine-tuning recovers and wins on every metric.
+
+### Does better prediction reduce write amplification? **Only modestly, and not via the best model.**
+
+45 runs, 3 workloads x 3 utilizations x 5 configurations, 1,000,000 identical
+write requests each (`results/metrics/ablation.csv`):
+
+| Configuration | mean change in WAF vs MIXED | best | worst |
+| :--- | ---: | ---: | ---: |
+| **LSTM pretrained** | **-5.02%** | -13.12% | +0.07% |
+| RULE_BASED | -4.10% | -12.83% | +0.15% |
+| LSTM pretrained+finetuned | -3.53% | -12.07% | +0.12% |
+| LSTM scratch | -3.07% | -8.27% | -0.03% |
+
+Three findings worth stating plainly:
+
+* **The chain breaks.** `pretrained_finetuned` is the best *predictor* on all
+  three workloads but only the third best *placement policy*. Better
+  rewrite-interval prediction did not produce better hot/cold placement here.
+* **The margin over the simple heuristic is small** — about 0.9 percentage
+  points on average. A running mean and one comparison gets most of the way.
+* **Gains shrink as utilization rises**, the opposite of the usual intuition:
+  -7.7% at 70% utilization but -2.4% at 85%. With little free space the
+  collector must clean nearly-full segments however they were separated.
+
+External generalization is weak: on `systor_lun0` nothing beats MIXED by more
+than 1.9%, and at 85% utilization several configurations are marginally worse.
+
+A methodological defect found during this work — the rule-based control was
+thresholded with the model's cutoff rather than its own statistic, which made it
+label 2 writes HOT out of 550,987 — is documented in `docs/progress.md`. It
+changed the reported conclusion, so it is recorded rather than quietly fixed.
+
+Limitations (trace age, truncation, one external workload, single training seed,
+no significance testing) are listed in `docs/progress.md` and `docs/methodology.md`.
+
+---
+
 ## Core Concept: Hot/Cold vs. Valid/Invalid
 
 An essential design principle in SmartGC is the independence of validity and temperature:
