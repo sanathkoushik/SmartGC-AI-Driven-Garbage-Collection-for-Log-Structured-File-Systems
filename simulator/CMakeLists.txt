@@ -5,6 +5,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# The MinGW Makefiles generator defaults to putting include flags in an
+# @response-file to dodge Windows command-line length limits. clangd (used by
+# editor tooling via compile_commands.json) does not reliably resolve those on
+# Windows, which shows up as false "file not found" / "unknown type" errors
+# for project headers and even <cstdint>/std:: in the editor despite the
+# actual build succeeding. Forcing inline flags fixes editor IntelliSense with
+# no effect on the real build (this project's command lines are nowhere near
+# the length limit response files exist to avoid).
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
+
 # Compiler warning flags
 if(MSVC)
     add_compile_options(/W4 /permissive-)

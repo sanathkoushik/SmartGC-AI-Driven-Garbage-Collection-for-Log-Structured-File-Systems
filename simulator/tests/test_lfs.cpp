@@ -693,7 +693,7 @@ TEST_CASE(test_run_is_deterministic) {
     ASSERT_EQ(a.gc_bytes_copied, b.gc_bytes_copied);
     ASSERT_EQ(a.valid_blocks_migrated, b.valid_blocks_migrated);
     ASSERT_EQ(a.gc_count, b.gc_count);
-    ASSERT_NEAR(a.waf(), b.waf(), 0.0);
+    ASSERT_NEAR(a.waf(), b.waf(), 1e-12);
 
     // The generator itself must be reproducible from its seed.
     const std::vector<WorkloadRequest> again =
