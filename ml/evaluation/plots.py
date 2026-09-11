@@ -26,9 +26,11 @@ import pandas as pd
 from ml.common.config import load_config, get, repo_path
 
 # Okabe-Ito colourblind-safe categorical set, assigned to policies in ladder
-# order and never cycled.
-LADDER = ["MIXED", "RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"]
-COLORS = dict(zip(LADDER, ["#999999", "#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00"]))
+# order and never cycled. HYBRID_ROBUST_SMARTGC (Phase 8) is appended after the
+# original 6-rung ladder so existing bar/line ordering is unaffected.
+LADDER = ["MIXED", "RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC",
+          "HYBRID_ROBUST_SMARTGC"]
+COLORS = dict(zip(LADDER, ["#999999", "#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7"]))
 INK, MUTED, GRID = "#222222", "#666666", "#DDDDDD"
 PLOTS = repo_path("results", "plots")
 
@@ -175,15 +177,16 @@ def plot_real_ladder(matrix_csv: str) -> None:
     with the synthetic-Zipf equivalents alongside for context."""
     df = pd.read_csv(matrix_csv)
     df = df[df["learned_trigger_enabled"] == 0]
-    real_pols = ["MIXED", "RULE_BASED", "LSTM_ATTN_SMARTGC"]
+    real_pols = ["MIXED", "RULE_BASED", "LSTM_ATTN_SMARTGC", "HYBRID_ROBUST_SMARTGC"]
     real_key = next((k for k in ("financial1_op1.5", "financial1") if k in set(df["workload_name"])), None)
     if real_key is None:
         return
     groups = [("synthetic_zipf", "synthetic Zipf"), (real_key, "real (SPC Financial1)")]
     fig, ax = plt.subplots(figsize=(8, 4.4))
     x = np.arange(len(groups))
-    w = 0.26
+    w = 0.8 / max(1, len(real_pols))
     ymax = 1.0
+    mid = (len(real_pols) - 1) / 2.0
     for k, pol in enumerate(real_pols):
         vals = []
         for wl, _ in groups:
@@ -192,7 +195,7 @@ def plot_real_ladder(matrix_csv: str) -> None:
             vals.append(v)
             if np.isfinite(v):
                 ymax = max(ymax, v)
-        bars = ax.bar(x + (k - 1) * w, vals, width=w, color=COLORS[pol], zorder=3, label=pol)
+        bars = ax.bar(x + (k - mid) * w, vals, width=w, color=COLORS[pol], zorder=3, label=pol)
         for b, v in zip(bars, vals):
             if np.isfinite(v):
                 ax.text(b.get_x() + b.get_width() / 2, v, f"{v:.3f}", ha="center", va="bottom",
@@ -209,12 +212,70 @@ def plot_real_ladder(matrix_csv: str) -> None:
     plt.close(fig)
 
 
+def plot_robustness_tradeoff(sweep_csv: str) -> None:
+    """Phase 8 - WAF vs robustness_lambda for HYBRID_ROBUST_SMARTGC, one line per
+    trace: the empirical consistency-robustness tradeoff curve that motivated
+    the config default (docs/related_work.md row 9)."""
+    if not os.path.exists(sweep_csv):
+        return
+    df = pd.read_csv(sweep_csv)
+    if df.empty:
+        return
+    traces = [t for t in ("synthetic_zipf", "financial1", "synthetic_drift") if t in set(df["workload_name"])]
+    traces += [t for t in df["workload_name"].unique() if t not in traces]
+    trace_colors = dict(zip(traces, ["#0072B2", "#D55E00", "#009E73", "#E69F00"]))
+    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    for t in traces:
+        sub = df[df["workload_name"] == t].sort_values("robustness_lambda")
+        ax.plot(sub["robustness_lambda"], sub["waf"], marker="o", markersize=5,
+                color=trace_colors.get(t, INK), linewidth=2, label=t, zorder=3)
+    _style(ax, "HYBRID_ROBUST_SMARTGC: WAF vs robustness_lambda\n"
+               "(lambda=0: pure model trust -> lambda=1: always RULE_BASED)",
+           "robustness_lambda", "WAF")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "robustness_tradeoff.png"), dpi=150)
+    plt.close(fig)
+
+
+def plot_seed_robustness(seed_csv: str) -> None:
+    """Phase 9 - mean +/- std WAF per policy across multiple seeds on synthetic
+    Zipf, so single-seed ladder claims can be read against their own variance."""
+    if not os.path.exists(seed_csv):
+        return
+    df = pd.read_csv(seed_csv)
+    if df.empty:
+        return
+    order = [p for p in LADDER if p in set(df["placement_policy"])]
+    stats = df.groupby("placement_policy")["waf"].agg(["mean", "std", "count"]).reindex(order)
+    fig, ax = plt.subplots(figsize=(8, 4.6))
+    x = np.arange(len(stats))
+    ax.bar(x, stats["mean"], yerr=stats["std"].fillna(0.0), capsize=4,
+           color=[COLORS[p] for p in stats.index], zorder=3,
+           error_kw={"ecolor": INK, "elinewidth": 1.2})
+    for i, (m, s, n) in enumerate(zip(stats["mean"], stats["std"], stats["count"])):
+        ax.text(i, m + (s if np.isfinite(s) else 0) + 0.0006, f"{m:.4f}\n(n={int(n)})",
+                ha="center", va="bottom", fontsize=8, color=INK)
+    ax.set_xticks(x)
+    ax.set_xticklabels(stats.index, rotation=20, ha="right")
+    ax.axhline(1.0, color=MUTED, linewidth=1, linestyle="--", zorder=2)
+    ax.set_ylim(0.995, (stats["mean"] + stats["std"].fillna(0.0)).max() * 1.01)
+    n_seeds = int(df["seed"].nunique())
+    _style(ax, f"Seed robustness: WAF mean ± std across {n_seeds} seeds\n"
+               "(synthetic Zipf, fixed GC trigger)", "", "WAF")
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "seed_robustness.png"), dpi=150)
+    plt.close(fig)
+
+
 def main() -> None:
     cfg = load_config()
     ap = argparse.ArgumentParser(description="SmartGC Phase 7 plot generation")
     ap.add_argument("--matrix", default=repo_path("results", "metrics", "matrix_results.csv"))
     ap.add_argument("--op-sweep", default=repo_path("results", "metrics", "op_sweep.csv"))
     ap.add_argument("--cost", default=repo_path("results", "metrics", "model_cost.csv"))
+    ap.add_argument("--robustness-sweep", default=repo_path("results", "metrics", "robustness_sweep.csv"))
+    ap.add_argument("--seed-robustness", default=repo_path("results", "metrics", "seed_robustness.csv"))
     ap.add_argument("--drift-name", default=str(get(cfg, "evaluation.drift_scenario_name", "synthetic_drift")))
     ap.add_argument("--real-name", default=str(get(cfg, "evaluation.real_trace_name", "financial1")))
     args = ap.parse_args()
@@ -228,6 +289,10 @@ def main() -> None:
         plot_real_ladder(args.matrix); made.append("real_ladder_waf.png")
     plot_waf_vs_op(args.op_sweep); made.append("waf_vs_op.png")
     plot_accuracy_vs_cost(args.cost); made.append("accuracy_vs_cost.png")
+    if os.path.exists(args.robustness_sweep):
+        plot_robustness_tradeoff(args.robustness_sweep); made.append("robustness_tradeoff.png")
+    if os.path.exists(args.seed_robustness):
+        plot_seed_robustness(args.seed_robustness); made.append("seed_robustness.png")
     for cand in (drift_json,
                  repo_path("results", "metrics", f"drift_status_{args.drift_name}.json")):
         if os.path.exists(cand):

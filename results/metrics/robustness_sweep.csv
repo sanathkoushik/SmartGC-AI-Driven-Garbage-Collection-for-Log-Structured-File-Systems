@@ -1,0 +1,15 @@
+workload_name,robustness_lambda,waf,mean_trust_weight
+synthetic_zipf,0.0,1.0326,0.9062
+synthetic_zipf,0.2,1.0412,0.7249
+synthetic_zipf,0.35,1.0408,0.589
+synthetic_zipf,0.5,1.0428,0.4531
+synthetic_zipf,0.65,1.0386,0.3172
+synthetic_zipf,0.8,1.0432,0.1812
+synthetic_zipf,1.0,1.0396,0.0
+financial1,0.0,1.217251,0.6723
+financial1,0.2,1.215513,0.5379
+financial1,0.35,1.214429,0.437
+financial1,0.5,1.214474,0.3362
+financial1,0.65,1.212263,0.2353
+financial1,0.8,1.212823,0.1345
+financial1,1.0,1.213588,0.0

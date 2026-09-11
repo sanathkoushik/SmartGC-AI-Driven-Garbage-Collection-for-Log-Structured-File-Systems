@@ -54,7 +54,8 @@ struct SimulatorConfig {
             case PlacementPolicy::STAT_ML:
             case PlacementPolicy::LSTM_SMARTGC:
                 return 2; // binary hot/cold
-            case PlacementPolicy::LSTM_ATTN_SMARTGC: {
+            case PlacementPolicy::LSTM_ATTN_SMARTGC:
+            case PlacementPolicy::HYBRID_ROBUST_SMARTGC: {
                 size_t n = migration_stream_count;
                 if (n < 1) n = 1;
                 if (n > MAX_STREAM_CLASSES) n = MAX_STREAM_CLASSES;

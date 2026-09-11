@@ -46,6 +46,9 @@ results/metrics/*
 !results/metrics/model_cost.csv
 !results/metrics/trace_stats_financial1.csv
 !results/metrics/trace_stats_financial1_hist.csv
+!results/metrics/robustness_sweep.csv
+!results/metrics/seed_robustness.csv
+!results/metrics/seed_robustness_summary.csv
 results/plots/*
 !results/plots/.gitkeep
 !results/plots/ladder_waf.png
@@ -54,10 +57,14 @@ results/plots/*
 !results/plots/gc_migration_tail.png
 !results/plots/drift_timeline.png
 !results/plots/accuracy_vs_cost.png
+!results/plots/robustness_tradeoff.png
+!results/plots/seed_robustness.png
 *.log
 
 # IDE & OS files
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/c_cpp_properties.json
 .idea/
 .DS_Store
 Thumbs.db

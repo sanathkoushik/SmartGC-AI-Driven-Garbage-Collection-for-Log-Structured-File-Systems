@@ -5,3 +5,4 @@ PyYAML>=6.0
 scikit-learn>=1.4
 torch>=2.2          # CPU build is sufficient
 matplotlib>=3.8
+pytest>=8.0         # ml/ unit tests: pytest -q (from repo root)

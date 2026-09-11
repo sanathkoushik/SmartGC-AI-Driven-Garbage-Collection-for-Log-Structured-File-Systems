@@ -343,7 +343,8 @@ TEST_CASE(test_hand_computed_waf) {
 TEST_CASE(test_placement_policy_and_streams) {
     const PlacementPolicy all[] = {
         PlacementPolicy::MIXED, PlacementPolicy::RULE_BASED, PlacementPolicy::LSTM_SMARTGC,
-        PlacementPolicy::SUP_LIKE, PlacementPolicy::STAT_ML, PlacementPolicy::LSTM_ATTN_SMARTGC
+        PlacementPolicy::SUP_LIKE, PlacementPolicy::STAT_ML, PlacementPolicy::LSTM_ATTN_SMARTGC,
+        PlacementPolicy::HYBRID_ROBUST_SMARTGC
     };
     for (PlacementPolicy p : all) {
         ASSERT_TRUE(placement_policy_from_string(placement_policy_to_string(p)) == p);
@@ -368,6 +369,11 @@ TEST_CASE(test_placement_policy_and_streams) {
     c.migration_stream_count = 3;
     ASSERT_EQ(c.effective_stream_count(), 3);
     c.migration_stream_count = 9; // clamped to MAX_STREAM_CLASSES
+    ASSERT_EQ(c.effective_stream_count(), 3);
+
+    // HYBRID_ROBUST_SMARTGC shares LSTM_ATTN_SMARTGC's multi-stream dispatch.
+    c.placement_policy = PlacementPolicy::HYBRID_ROBUST_SMARTGC;
+    c.migration_stream_count = 3;
     ASSERT_EQ(c.effective_stream_count(), 3);
 }
 

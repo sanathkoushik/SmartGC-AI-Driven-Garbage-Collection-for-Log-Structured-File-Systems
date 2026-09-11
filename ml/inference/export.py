@@ -25,6 +25,10 @@ from ml.preprocessing.features import (
 from ml.inference.rolling_cutoff import RollingPercentileCutoff
 from ml.inference.drift import DriftDetector
 from ml.inference.confidence_gate import ConfidenceGate, mc_dropout_confidence
+from ml.inference.robust_blend import blend_interval
+
+HYBRID_POLICY = "HYBRID_ROBUST_SMARTGC"
+HYBRID_BASE_MODEL = "LSTM_ATTN_SMARTGC"
 
 
 def _load_scaler(path: str) -> dict:
@@ -60,8 +64,7 @@ def _build_or_load_sequences(trace_path: str, seq_len: int, rolling_window: int,
 
 
 def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
-               n_streams: int, cfg: dict) -> dict:
-    ml = cfg.get("ml", {})
+               n_streams: int, cfg: dict, robust_lambda: float | None = None) -> dict:
     seq_len = int(get(cfg, "ml.sequence_length", 10))
     rolling_window = seq_len
     scaler = _load_scaler(repo_path("ml", "models", "scaler.json"))
@@ -69,8 +72,12 @@ def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
     Xs, meta, has_history = _build_or_load_sequences(trace_path, seq_len, rolling_window, scaler)
     lbas, widx, ts = meta[:, 0], meta[:, 1], meta[:, 2]
 
-    # Model + always-available RULE_BASED fallback predictions.
-    model = build(policy, scaler, cfg)
+    # Model + always-available RULE_BASED fallback predictions. HYBRID_ROBUST_SMARTGC
+    # (Phase 8) reuses the LSTM_ATTN_SMARTGC checkpoint verbatim (see registry.py) --
+    # only the confidence handling below differs for that policy.
+    is_hybrid = policy == HYBRID_POLICY
+    build_name = HYBRID_BASE_MODEL if is_hybrid else policy
+    model = build(build_name, scaler, cfg)
     if model.trainable:
         if not model_dir or not os.path.isdir(model_dir):
             raise SystemExit(f"export: trained model dir required for {policy}: {model_dir}")
@@ -83,6 +90,9 @@ def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
     # First-ever write of an LBA has no real history -> distrust it.
     confidence = np.where(has_history, confidence, np.minimum(confidence, 0.30))
     model_interval = np.where(has_history, model_interval, rb_interval)
+
+    lam = float(get(cfg, "ml.robustness_lambda", 0.35)) if robust_lambda is None else float(robust_lambda)
+    blended_interval, trust_w = blend_interval(model_interval, rb_interval, confidence, lam)
 
     gate = ConfidenceGate(float(get(cfg, "ml.confidence_fallback_threshold", 0.55)))
     rc = RollingPercentileCutoff(
@@ -97,8 +107,16 @@ def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
 
     rows = []
     for i in range(len(lbas)):
-        trust = gate.decide(float(confidence[i]))
-        interval = float(model_interval[i] if trust else rb_interval[i])
+        if is_hybrid:
+            # Continuous, confidence-weighted, robustness-capped blend
+            # (ml/inference/robust_blend.py) replaces the binary gate below --
+            # this generalises ConfidenceGate's hard cutoff into a tunable
+            # consistency/robustness tradeoff (Lange/Naor/Yadgar, SIGMETRICS'25
+            # framing; see docs/related_work.md).
+            interval = float(blended_interval[i])
+        else:
+            trust = gate.decide(float(confidence[i]))
+            interval = float(model_interval[i] if trust else rb_interval[i])
         interval = max(interval, 0.0)
 
         cls = rc.classify(interval)                     # decide before recording
@@ -126,11 +144,14 @@ def run_export(trace_path: str, policy: str, model_dir: str | None, name: str,
         "policy": policy,
         "hot_fraction": round(hot / len(rows), 4) if rows else 0.0,
         "stream_bucket_counts": {STREAM_NAMES.get(i, str(i)): int(c) for i, c in enumerate(buckets)},
-        "confidence_fallback_rate": round(gate.fallback_rate, 4),
+        "confidence_fallback_rate": round(gate.fallback_rate, 4) if not is_hybrid else None,
         "drift_needs_retrain": dd.needs_retrain,
         "drift_last_flag_event": dd.last_flag_event,
         "drift_status_json": drift_path,
     }
+    if is_hybrid:
+        summary["robustness_lambda"] = lam
+        summary["mean_trust_weight"] = round(float(np.mean(trust_w)), 4)
     return summary
 
 
@@ -142,14 +163,20 @@ def main() -> None:
     ap.add_argument("--model-dir", default=None, help="trained artefact dir (ml/models/<MODEL>_<ds>)")
     ap.add_argument("--name", default=None, help="predictions name (default: <model>_<trace stem>)")
     ap.add_argument("--streams", type=int, default=int(get(cfg, "gc.migration_stream_count", 3)))
+    ap.add_argument("--robust-lambda", type=float, default=None,
+                    help="HYBRID_ROBUST_SMARTGC only: override ml.robustness_lambda for this run")
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.trace))[0]
     name = args.name or f"{args.model}_{stem}"
     if args.model_dir is None and args.model in ("STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"):
         args.model_dir = repo_path("ml", "models", f"{args.model}_{stem}")
+    elif args.model_dir is None and args.model == HYBRID_POLICY:
+        # Reuses the LSTM_ATTN_SMARTGC checkpoint verbatim -- no separate training.
+        args.model_dir = repo_path("ml", "models", f"{HYBRID_BASE_MODEL}_{stem}")
 
-    summary = run_export(args.trace, args.model, args.model_dir, name, max(1, args.streams), cfg)
+    summary = run_export(args.trace, args.model, args.model_dir, name, max(1, args.streams),
+                          cfg, robust_lambda=args.robust_lambda)
     print(json.dumps(summary, indent=2))
 
 

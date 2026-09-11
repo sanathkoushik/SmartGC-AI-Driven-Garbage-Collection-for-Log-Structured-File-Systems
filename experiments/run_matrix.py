@@ -37,10 +37,22 @@ SIM = repo_path("simulator", "build", "smartgc_sim.exe")
 if not os.path.exists(SIM):
     SIM = repo_path("simulator", "build", "smartgc_sim")
 
-LADDER = ["MIXED", "RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"]
+# The original 6-rung falsifiable baseline ladder (docs/progress.md Phase 4a).
+BASE_LADDER = ["MIXED", "RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"]
+# Phase 8: HYBRID_ROBUST_SMARTGC reuses the LSTM_ATTN_SMARTGC checkpoint verbatim
+# (see ml/models/registry.py) -- it needs predictions exported but never trains.
+HYBRID_POLICY = "HYBRID_ROBUST_SMARTGC"
+LADDER = BASE_LADDER + [HYBRID_POLICY]
 TRAINABLE = {"STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"}
-ML_POLICIES = {"RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"}
+REUSES_CHECKPOINT_OF = {HYBRID_POLICY: "LSTM_ATTN_SMARTGC"}
+ML_POLICIES = {"RULE_BASED", "SUP_LIKE", "STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC", HYBRID_POLICY}
 BEST = "LSTM_ATTN_SMARTGC"
+# Policies for which the C++ simulator's own confidence-based re-gate must be
+# disabled (confidence-threshold 0): their Python export already folds
+# confidence into the interval before the rolling cutoff runs, so re-gating in
+# C++ with its own independent RULE_BASED heuristic would double-apply (and
+# override) that decision.
+DISABLE_CPP_REGATE = {HYBRID_POLICY}
 
 
 def sh(cmd: list[str], **kw) -> None:
@@ -193,8 +205,9 @@ def export_predictions(policy: str, trace_path: str, trace_name: str, streams: i
     name = f"{policy}_{stem}"
     cmd = [PY, "-m", "ml.inference.export", "--trace", trace_path, "--model", policy,
            "--name", name, "--streams", streams]
-    if policy in TRAINABLE:
-        cmd += ["--model-dir", repo_path("ml", "models", f"{policy}_{trace_name}")]
+    checkpoint_owner = REUSES_CHECKPOINT_OF.get(policy, policy)
+    if checkpoint_owner in TRAINABLE:
+        cmd += ["--model-dir", repo_path("ml", "models", f"{checkpoint_owner}_{trace_name}")]
     sh(cmd)
     return repo_path("data", "predictions", f"{name}.csv")
 
@@ -203,6 +216,7 @@ def run_cell(cfg: dict, out_csv: str, policy: str, trace_name: str, trace_path: 
              learned: bool, gc_policy_csv: str | None, geometry: dict, seed: int,
              streams: int, conf_thr: float) -> None:
     preds = export_predictions(policy, trace_path, trace_name, streams)
+    conf_thr = 0.0 if policy in DISABLE_CPP_REGATE else conf_thr
     effective = {
         "policy": policy, "trace": trace_name, "learned_trigger": learned,
         "streams": streams, "confidence_threshold": conf_thr, "seed": seed, **geometry,
@@ -225,7 +239,7 @@ def run_cell(cfg: dict, out_csv: str, policy: str, trace_name: str, trace_path: 
     sh(cmd)
 
 
-def matrix_cells(traces: dict, cfg: dict) -> list[dict]:
+def matrix_cells(traces: dict, cfg: dict, only_policy: str | None = None) -> list[dict]:
     real = str(get(cfg, "evaluation.real_trace_name", "msr_cambridge_src1"))
     drift = str(get(cfg, "evaluation.drift_scenario_name", "synthetic_drift"))
     cells = [{"policy": p, "trace": "synthetic_zipf", "learned": False} for p in LADDER]
@@ -234,9 +248,14 @@ def matrix_cells(traces: dict, cfg: dict) -> list[dict]:
     # is apples-to-apples with the synthetic ladder, then the best model x learned.
     cells += [{"policy": p, "trace": real, "learned": False} for p in LADDER]
     cells.append({"policy": BEST, "trace": real, "learned": True})
-    # drift scenario: best model, fixed vs learned trigger.
+    # drift scenario: best model, fixed vs learned trigger, plus the hybrid rung
+    # (the drift scenario is where sequence models are expected to earn their
+    # keep over a naive/robust baseline -- docs/progress.md Phase 4a finding).
     cells.append({"policy": BEST, "trace": drift, "learned": False})
     cells.append({"policy": BEST, "trace": drift, "learned": True})
+    cells.append({"policy": HYBRID_POLICY, "trace": drift, "learned": False})
+    if only_policy:
+        cells = [c for c in cells if c["policy"] == only_policy]
     return cells
 
 
@@ -261,7 +280,9 @@ def op_sweep(cfg: dict, traces: dict, seed: int, streams: int, conf_thr: float) 
             total_segments = max(8, math.ceil(live / (float(op) * bps)) + gc_thr + streams + 2)
             geom = {"total_segments": total_segments, "blocks_per_segment": bps, "gc_threshold": gc_thr}
             for policy in LADDER:
-                effective = {"op_ratio": op, "policy": policy, "trace": trace_name, **geom, "seed": seed}
+                cell_conf_thr = 0.0 if policy in DISABLE_CPP_REGATE else conf_thr
+                effective = {"op_ratio": op, "policy": policy, "trace": trace_name,
+                             "confidence_threshold": cell_conf_thr, **geom, "seed": seed}
                 rid = run_id_for(effective)
                 preds = export_predictions(policy, trace_path, trace_name, streams)
                 cmd = [SIM, "--placement-policy", policy, "--trace", trace_path,
@@ -270,7 +291,7 @@ def op_sweep(cfg: dict, traces: dict, seed: int, streams: int, conf_thr: float) 
                        "--workload-name", f"{trace_name}_op{op}", "--run-id", rid,
                        "--export-metrics", out_csv, "--quiet"]
                 if preds:
-                    cmd += ["--predictions", preds, "--confidence-threshold", conf_thr]
+                    cmd += ["--predictions", preds, "--confidence-threshold", cell_conf_thr]
                 sh(cmd)
     print(f"[run_matrix] OP sweep ({', '.join(sweep_traces)}) -> {out_csv}")
     return out_csv
@@ -289,10 +310,16 @@ def main() -> None:
     ap.add_argument("--op-sweep-only", action="store_true",
                     help="run ONLY the over-provisioning sweep (reuse prep, skip matrix cells)")
     ap.add_argument("--append", action="store_true", help="append to matrix_results.csv instead of resetting")
+    ap.add_argument("--only-policy", default=None, choices=LADDER,
+                    help="run matrix cells for a single policy only (implies --skip-prep --append); "
+                         "used to add a new rung's rows without re-running/duplicating the rest")
     args = ap.parse_args()
     if args.op_sweep_only:
         args.skip_prep = True
         args.op_sweep = True
+    if args.only_policy:
+        args.skip_prep = True
+        args.append = True
 
     epochs = args.epochs if args.epochs is not None else (3 if args.quick else None)
     episodes = 8 if args.quick else None
@@ -329,7 +356,7 @@ def main() -> None:
         return
 
     print("=== [4/4] matrix cells ===")
-    for cell in matrix_cells(traces, cfg):
+    for cell in matrix_cells(traces, cfg, only_policy=args.only_policy):
         tname = cell["trace"]
         if tname not in geom_cache:
             # real leg is stressed (~1.5x OP) so GC engages on the wide OLTP

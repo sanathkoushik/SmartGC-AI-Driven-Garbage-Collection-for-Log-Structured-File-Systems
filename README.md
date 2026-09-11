@@ -52,6 +52,18 @@ real traces.
    throughput and memory are reported next to the WAF numbers, so the
    host-side-ML-overhead question (raised by in-storage-inference work such as
    Shiro) can be answered honestly rather than ignored.
+6. **Phase 8 — closing the real-data gap with a learning-augmented hybrid,
+   not a bigger model.** The 6-rung ladder itself falsified "deep learning
+   helps" on real OLTP data (below). Rather than treating that as something to
+   paper over with a larger network, `HYBRID_ROBUST_SMARTGC` reuses the exact
+   same LSTM+attention checkpoint but replaces the binary confidence-fallback
+   gate with a continuous, confidence-weighted blend against `RULE_BASED`,
+   capped by a tunable `robustness_lambda` — a direct, empirically-tuned
+   instantiation of the *consistency-robustness* tradeoff from Lange, Naor &
+   Yadgar's "Optimal SSD Management with Predictions" (ACM SIGMETRICS 2025;
+   `docs/related_work.md`). Deep learning remains the core predictive
+   mechanism throughout; Phase 8 changes how its prediction is *used* at
+   inference time, not what predicts it.
 
 ### Honest findings (full-epoch run, `results/metrics/matrix_results.csv`)
 
@@ -65,6 +77,31 @@ real traces.
 | `STAT_ML` (sklearn GBDT) | 1.0488 | 1.2213 |
 | `LSTM_SMARTGC` (vanilla LSTM) | 1.0468 | 1.2184 |
 | `LSTM_ATTN_SMARTGC` (LSTM+attn, multi-stream) | **1.0072** ← best on synthetic | 1.2426 |
+| `HYBRID_ROBUST_SMARTGC` (Phase 8, robustness-blend, λ=0.65) | 1.0386 | **1.2123** |
+
+`HYBRID_ROBUST_SMARTGC` reuses the `LSTM_ATTN_SMARTGC` checkpoint verbatim (no
+extra training) at `robustness_lambda=0.65`, chosen empirically as the
+real-trace WAF minimum from a lambda sweep (`results/plots/robustness_tradeoff.png`).
+On real data it recovers **≈56%** of the gap between the worst learned rung
+(`LSTM_ATTN_SMARTGC`, 1.2426) and `RULE_BASED` (1.1879) while still beating
+`MIXED` (1.3015) substantially — a genuine, measured improvement, though it
+does not fully close the gap to `RULE_BASED`. On synthetic Zipf it beats every
+non-attention rung *on average*; on the drift scenario (not shown above; see
+`docs/progress.md` Phase 8) it costs a little relative to the un-blended
+model — exactly the theoretically expected price of added robustness when the
+model was already right.
+
+**A note on single-seed numbers.** Every table above (and every number in
+`matrix_results.csv`) is from one fixed seed (42). A dedicated 5-seed check
+(Phase 9, `python -m experiments.seed_robustness`,
+`results/plots/seed_robustness.png`) reruns the whole synthetic-Zipf pipeline
+per seed and finds: `LSTM_ATTN_SMARTGC` best at every seed individually (a
+robust claim); `HYBRID_ROBUST_SMARTGC` beats `RULE_BASED` at 4 of 5 seeds by a
+margin comparable to its own standard deviation (a real but modest effect, not
+a clean sweep); and vanilla `LSTM_SMARTGC` has ~4–5x the seed-to-seed variance
+of every other rung, occasionally tying the attention model and occasionally
+landing near the bottom. See `docs/progress.md` Phase 9 for the full mean±std
+table before quoting any close single-seed comparison.
 
 - **The ladder falsifies the "deep learning helps" hypothesis on real data.** On
   synthetic Zipf the multi-stream LSTM+attention is far ahead (WAF 1.007 vs
@@ -95,10 +132,17 @@ real traces.
 
 ```
 python -m experiments.run_matrix --op-sweep      # full Section-4 matrix + OP sweep
+python -m experiments.robustness_sweep            # Phase 8: lambda tradeoff curve
+python -m experiments.seed_robustness             # Phase 9: 5-seed mean+-std (synthetic Zipf)
 python -m ml.evaluation.cost                      # accuracy-vs-cost table
 python -m ml.evaluation.plots                     # comparative figures
 ```
-Every metrics row carries a `run_id` = hash of that cell's effective config.
+Every metrics row carries a `run_id` = hash of that cell's effective config. To
+add just the Phase 8 rung's rows to an existing `matrix_results.csv` without
+re-running (or duplicating) the rest of the ladder:
+```
+python -m experiments.run_matrix --only-policy HYBRID_ROBUST_SMARTGC
+```
 
 ---
 
@@ -129,6 +173,7 @@ Raw I/O Trace  (synthetic Zipf  |  UMass SPC Financial1 real trace  |  drift sce
       │
       ▼
 [Phase 4b: ml/inference/export.py]  rolling percentile cutoff · drift detector · confidence gate
+      │  Phase 8: HYBRID_ROBUST_SMARTGC — same checkpoint, robustness-blend inference (ml/inference/robust_blend.py)
       │
       ▼ (predictions.csv v2: …, predicted_stream_class, confidence)   ── drift_status_<name>.json
 [Phase 5: C++17 LFS Simulator — simulator/]
@@ -164,13 +209,16 @@ SmartGC/
 │   ├── preprocessing/        # normalize.py, features.py, trace_stats.py, make_sample_trace.py
 │   ├── models/               # baseline ladder: rule_based, sup_like, stat_ml, lstm, lstm_attention
 │   ├── training/             # train.py, gc_controller.py (learned trigger), retrain_now.py
-│   ├── inference/            # rolling_cutoff, drift, confidence_gate, export.py
+│   ├── inference/            # rolling_cutoff, drift, confidence_gate, robust_blend (Phase 8), export.py
 │   └── evaluation/           # cost.py (accuracy-vs-cost), plots.py
-├── experiments/              # run_matrix.py — full Section-4 benchmark matrix
+├── experiments/              # run_matrix.py (Section-4 matrix), robustness_sweep.py (Phase 8),
+│                             #   seed_robustness.py (Phase 9: multi-seed mean+-std)
 ├── results/
 │   ├── metrics/              # CSV output metrics from simulator runs
 │   └── plots/                # Comparative visualizations
 ├── scripts/                  # Helper automation scripts
+├── tests/                    # pytest unit tests for ml/ (rolling cutoff, drift, confidence
+│                             #   gate, robustness blend, LSTM+attention); run `pytest -q`
 ├── config/
 │   └── config.yaml           # Centralized configuration (no hardcoded parameters)
 └── docs/
@@ -189,9 +237,23 @@ SmartGC/
 ### Build Instructions
 ```bash
 # From workspace root
-cmake -S simulator -B simulator/build
+cmake -S simulator -B simulator/build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build simulator/build --config Release
 ```
+The `CMAKE_EXPORT_COMPILE_COMMANDS` flag generates `simulator/build/compile_commands.json`,
+which `.clangd` and `.vscode/c_cpp_properties.json` (both checked in) point editor
+tooling (clangd, VS Code C/C++) at, so IntelliSense/diagnostics resolve the
+project's headers and the compiler's standard library correctly.
+`CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES` is also forced `OFF` in
+`simulator/CMakeLists.txt`: the MinGW Makefiles generator otherwise hides
+every `-I` include path behind an `@....rsp` response file (to dodge Windows
+command-line length limits), which clangd on Windows frequently fails to
+resolve — showing up as false "cannot find `lfs_simulator.hpp`", "unknown
+type `LbaType`", or "undeclared `std`" errors in the editor despite the real
+build succeeding. Without a build directory yet, or after deleting one,
+editors may show these same spurious errors — they are not compile errors;
+run the two commands above and reload the editor (or restart its language
+server) to clear them.
 
 ### Running Tests
 ```bash

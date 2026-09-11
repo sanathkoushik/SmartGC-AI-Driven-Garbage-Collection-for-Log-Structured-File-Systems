@@ -20,7 +20,12 @@ import pandas as pd
 from ml.common.config import load_config, get, repo_path
 from ml.models.registry import build
 
-LEARNERS = ["STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC"]
+LEARNERS = ["STAT_ML", "LSTM_SMARTGC", "LSTM_ATTN_SMARTGC", "HYBRID_ROBUST_SMARTGC"]
+# HYBRID_ROBUST_SMARTGC (Phase 8) reuses the LSTM_ATTN_SMARTGC checkpoint verbatim
+# (ml/models/registry.py) -- report its cost from that artefact dir; the extra
+# robustness blend at inference is an O(1) elementwise op per event, negligible
+# next to the LSTM forward pass already being measured.
+CHECKPOINT_ALIAS = {"HYBRID_ROBUST_SMARTGC": "LSTM_ATTN_SMARTGC"}
 
 
 def _artifact_bytes(d: str) -> int:
@@ -49,11 +54,12 @@ def _cost_rows(dataset: str, cfg: dict, scaler: dict, batch_size: int) -> list[d
 
     rows = []
     for name in LEARNERS:
-        mdir = repo_path("ml", "models", f"{name}_{dataset}")
+        checkpoint_owner = CHECKPOINT_ALIAS.get(name, name)
+        mdir = repo_path("ml", "models", f"{checkpoint_owner}_{dataset}")
         if not os.path.isdir(mdir):
             print(f"[cost] skip {name}/{dataset}: no trained artefact")
             continue
-        model = build(name, scaler, cfg).load(mdir)
+        model = build(checkpoint_owner, scaler, cfg).load(mdir)
         model.predict_interval(Xte[: min(len(Xte), 128)])  # warm up
         tracemalloc.start()
         lat = model.measure_latency(Xte, batch_size=batch_size, repeats=5)

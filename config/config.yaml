@@ -72,12 +72,28 @@ ml:
   drift_kl_threshold: 0.15            # drift flag trigger (KL between consecutive windows)
   confidence_fallback_threshold: 0.55 # below this -> fall back to RULE_BASED for that block
   drift_window_events: 2000           # window size for the drift detector
-  confidence_ensemble_size: 3         # lightweight models for predictive-variance confidence
+  confidence_ensemble_size: 3         # number of MC-dropout stochastic forward passes on the
+                                       # *same* trained model (not separate models) used to
+                                       # estimate predictive confidence (ml/inference/confidence_gate.py)
 
   # ---- Phase 4a rung 6: attention ----
   attention:
-    enabled: true
+    enabled: true                     # false -> last-hidden-state pooling (same as LSTM_SMARTGC)
     num_heads: 2                      # small - lightweight per-block model, not an LLM
+
+  # ---- Phase 8: learning-augmented robustness blend (HYBRID_ROBUST_SMARTGC) ----
+  # Continuous generalisation of confidence_fallback_threshold above: instead of
+  # a hard trust/fallback cutoff, the model's prediction and the RULE_BASED
+  # prediction are blended with weight `confidence * (1 - robustness_lambda)`
+  # on the model (ml/inference/robust_blend.py). 0.0 = pure confidence-weighted
+  # trust in the model; 1.0 = always RULE_BASED regardless of confidence.
+  # Directly instantiates the consistency-robustness tradeoff from "Optimal SSD
+  # Management with Predictions" (Lange/Naor/Yadgar, ACM SIGMETRICS 2025;
+  # docs/related_work.md). Value chosen from the empirical sweep
+  # (results/metrics/robustness_sweep.csv, results/plots/robustness_tradeoff.png):
+  # 0.65 minimizes real-trace (Financial1) WAF among the tested points while
+  # staying within the noise band on synthetic Zipf (see docs/progress.md Phase 8).
+  robustness_lambda: 0.65
 
 # ------------------------------------------------------------------------------
 # GC-time learned component (Phase 5)
@@ -86,7 +102,8 @@ gc:
   learned_trigger: false              # ablation switch
   trigger_state_window_events: 500
   migration_stream_count: 3           # SHORT / MEDIUM / LONG destination classes
-  controller_algorithm: "q_learning"  # q_learning | contextual_bandit
+  controller_algorithm: "q_learning"  # only q_learning is implemented (ml/training/gc_controller.py);
+                                       # reserved key for a future alternative controller
   controller_episodes: 40
   controller_epsilon: 0.15
   controller_alpha: 0.30

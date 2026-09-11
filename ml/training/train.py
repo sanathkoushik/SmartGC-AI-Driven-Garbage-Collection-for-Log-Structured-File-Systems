@@ -44,9 +44,13 @@ def main() -> None:
     ap.add_argument("--scaler", default=repo_path("ml", "models", "scaler.json"))
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--epochs", type=int, default=None, help="override ml.epochs")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="override random_seed (model init/shuffle/sklearn random_state) for this run")
     args = ap.parse_args()
     if args.epochs is not None:
         cfg = {**cfg, "ml": {**cfg.get("ml", {}), "epochs": int(args.epochs)}}
+    if args.seed is not None:
+        cfg = {**cfg, "random_seed": int(args.seed)}
 
     ds_path = _resolve_dataset(args.dataset)
     ds_name = os.path.splitext(os.path.basename(ds_path))[0].replace("sequences_", "")

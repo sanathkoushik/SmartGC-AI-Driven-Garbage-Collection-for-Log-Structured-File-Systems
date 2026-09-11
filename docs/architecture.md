@@ -144,6 +144,59 @@ constant. For each write event, in trace order:
 SHORT/…/LONG bucket edges are the evenly-spaced `100·k/N` percentiles of the
 window.
 
+### 2.8 Phase 8 — HYBRID_ROBUST_SMARTGC: learning-augmented robustness blend
+`ml/inference/robust_blend.py`, wired into `ml/inference/export.py`. Gap
+addressed: the Section-4 ladder found that on the real UMass SPC Financial1
+trace `RULE_BASED` beats every learned rung, and that the *existing* binary
+`ConfidenceGate` still trusts the model on the majority of real events yet is
+often wrong on that trusted majority. `HYBRID_ROBUST_SMARTGC` reuses the
+`LSTM_ATTN_SMARTGC` checkpoint verbatim (`ml/models/registry.py` maps both
+names to the same class; no separate training) but replaces the gate's hard
+threshold with a continuous blend:
+
+```
+trust_weight = clip(confidence, 0, 1) * (1 - robustness_lambda)
+blended_interval = trust_weight * model_interval + (1 - trust_weight) * rule_based_interval
+```
+
+`robustness_lambda = 0` recovers pure confidence-weighted trust in the model;
+`robustness_lambda = 1` always uses the `RULE_BASED` interval regardless of
+confidence. This directly instantiates the *consistency-robustness* tradeoff
+from Lange, Naor & Yadgar, "Optimal SSD Management with Predictions" (ACM
+SIGMETRICS 2025; `docs/related_work.md` row 9) as a tunable inference-time
+policy — a heuristic instantiation of that framing for this empirical ladder,
+not a reproduction of the paper's formal worst-case algorithm. The blended
+interval feeds the same rolling-percentile cutoff as every other rung, so it
+is a drop-in placement/migration policy: the simulator consumes it through the
+identical `predicted_stream_class`/`confidence` contract, dispatched by the
+same C++ code path as `LSTM_ATTN_SMARTGC` (`PlacementPolicy::HYBRID_ROBUST_SMARTGC`,
+`simulator/include/types.hpp`). Because the Python layer has already folded
+confidence into the interval, the simulator's own confidence-based re-gate is
+disabled for this policy (`--confidence-threshold 0`) to avoid double-applying
+two different heuristics. `robustness_lambda` is tuned empirically via
+`python -m experiments.robustness_sweep` (`results/metrics/robustness_sweep.csv`,
+`results/plots/robustness_tradeoff.png`); see `docs/progress.md` Phase 8 for
+the resulting numbers.
+
+**Note — two independent RULE_BASED heuristics.** `robustness_lambda = 1`
+folds `HYBRID_ROBUST_SMARTGC` down to "always trust the RULE_BASED interval",
+but this does **not** exactly reproduce the ladder's own `RULE_BASED` row, and
+the discrepancy is a pre-existing property of the codebase worth stating
+plainly: `PlacementPolicy::RULE_BASED` in the C++ simulator
+(`simulator/src/lfs_simulator.cpp::rule_based_class()`) never reads
+`predictions.csv` at all -- it computes its own zero-training heuristic
+directly from `write_count_`/`last_write_event_` with a fixed
+`blocks_per_segment`-sized threshold. Every other rung's Python-side fallback
+(including the robustness blend here) instead goes through
+`ml/models/rule_based.py::RuleBasedModel` -- a different heuristic (a blend of
+the last observed gap and the rolling mean interval) whose output is then run
+through the same dynamic rolling-percentile cutoff as the learned rungs. Both
+are legitimate, independently-motivated zero-training baselines; they are
+simply not the same computation, so `HYBRID_ROBUST_SMARTGC` at
+`robustness_lambda=1` should be read as "always trust the *Python* RULE_BASED
+signal, routed through the shared dynamic cutoff", not as an exact
+re-derivation of the `RULE_BASED` ladder rung.
+
 ### 2.7 Real-trace source / attribution
 The benchmark's real-trace slot (`evaluation.real_trace_name = "financial1"`)
 uses the **UMass SPC Financial1** trace — OLTP block I/O from a financial

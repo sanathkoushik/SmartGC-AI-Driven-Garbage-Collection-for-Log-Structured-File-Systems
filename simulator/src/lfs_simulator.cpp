@@ -207,7 +207,8 @@ size_t LfsSimulator::decide_placement_stream(LbaType lba) {
 
         case PlacementPolicy::STAT_ML:
         case PlacementPolicy::LSTM_SMARTGC:
-        case PlacementPolicy::LSTM_ATTN_SMARTGC: {
+        case PlacementPolicy::LSTM_ATTN_SMARTGC:
+        case PlacementPolicy::HYBRID_ROBUST_SMARTGC: {
             if (!predictions_.has_row(write_event_index_)) {
                 return phys_stream(rule_based_class(lba)); // heuristic fallback
             }
@@ -242,7 +243,8 @@ size_t LfsSimulator::decide_migration_stream(LbaType lba) const {
 
         case PlacementPolicy::STAT_ML:
         case PlacementPolicy::LSTM_SMARTGC:
-        case PlacementPolicy::LSTM_ATTN_SMARTGC: {
+        case PlacementPolicy::LSTM_ATTN_SMARTGC:
+        case PlacementPolicy::HYBRID_ROBUST_SMARTGC: {
             auto it = last_pred_stream_.find(lba);
             if (it != last_pred_stream_.end()) {
                 return phys_stream(static_cast<StreamClass>(

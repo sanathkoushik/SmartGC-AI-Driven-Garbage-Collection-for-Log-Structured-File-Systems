@@ -14,7 +14,7 @@ from __future__ import annotations
 from ml.models.torch_common import TorchIntervalModel, _torch
 
 
-def _make_attn_module(n_features, hidden_dim, num_layers, dropout, num_heads):
+def _make_attn_module(n_features, hidden_dim, num_layers, dropout, num_heads, attention_enabled=True):
     torch = _torch()
     nn = torch.nn
 
@@ -39,11 +39,13 @@ def _make_attn_module(n_features, hidden_dim, num_layers, dropout, num_heads):
             super().__init__()
             self.heads = heads
             self.head_dim = head_dim
+            self.attention_enabled = attention_enabled
             self.lstm = nn.LSTM(
                 input_size=n_features, hidden_size=hidden_dim, num_layers=num_layers,
                 batch_first=True, dropout=dropout if num_layers > 1 else 0.0,
             )
-            self.attn = nn.ModuleList([AdditiveAttention() for _ in range(heads)])
+            if attention_enabled:
+                self.attn = nn.ModuleList([AdditiveAttention() for _ in range(heads)])
             self.head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.ReLU(),
@@ -53,6 +55,8 @@ def _make_attn_module(n_features, hidden_dim, num_layers, dropout, num_heads):
 
         def forward(self, x):
             out, _ = self.lstm(x)  # [B, T, H]
+            if not self.attention_enabled:
+                return self.head(out[:, -1, :])  # last-hidden-state pooling, like LSTM_SMARTGC
             ctx = []
             for i, attn in enumerate(self.attn):
                 sl = out[:, :, i * self.head_dim:(i + 1) * self.head_dim]
@@ -74,4 +78,5 @@ class LSTMAttentionModel(TorchIntervalModel):
             num_layers=int(cfg.get("num_layers", 2)),
             dropout=float(cfg.get("dropout", 0.1)),
             num_heads=int(attn_cfg.get("num_heads", 2)),
+            attention_enabled=bool(attn_cfg.get("enabled", True)),
         )
