@@ -10,6 +10,16 @@ $$\text{WAF} = \frac{\text{Physical Bytes Written}}{\text{Logical Bytes Written}
 
 **SmartGC** investigates whether a sequence-based deep learning model (LSTM) trained on historical block-level rewrite intervals can predict future rewrite intervals accurately enough to classify logical block addresses (LBAs) as **HOT** or **COLD** *before* placement, and whether that improved prediction actually translates into fewer valid-block migrations and lower WAF.
 
+> **Companion study.** This branch's headline finding — the best *predictor*
+> was only the fourth-best *placement* policy — has a direct follow-up on the
+> [`phase8-9-hybrid-seed-robustness`](https://github.com/sanathkoushik/SmartGC-AI-Driven-Garbage-Collection-for-Log-Structured-File-Systems/tree/phase8-9-hybrid-seed-robustness)
+> branch: a falsifiable baseline ladder, a learning-augmented placement policy
+> (`HYBRID_ROBUST_SMARTGC`) that recovers part of that gap without retraining,
+> and a multi-seed robustness check. Developed in parallel by the two authors
+> of this project as two complementary halves of one submission — see
+> [`COMPANION_STUDY.md`](https://github.com/sanathkoushik/SmartGC-AI-Driven-Garbage-Collection-for-Log-Structured-File-Systems/blob/phase8-9-hybrid-seed-robustness/COMPANION_STUDY.md)
+> on that branch for how the two fit together.
+
 ---
 
 ## Honest Scope & Academic Novelty Framing
