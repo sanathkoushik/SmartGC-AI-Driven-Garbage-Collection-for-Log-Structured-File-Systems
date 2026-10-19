@@ -221,6 +221,20 @@ With the corrected threshold the heuristic labels ~28% of classified writes HOT,
 
 ---
 
+## Phase 8 - Classical ML Models Added to the Comparison
+
+Linear regression, random forest and XGBoost were added (`ml/models/classical.py`) and compared with the baselines and LSTMs. Results and tables are in the README section "Classical ML vs. LSTM vs. Rule-Based"; commands are `experiments/ml_comparison.py`, `experiments/simulate_classical.py` and `experiments/plot_ml_comparison.py`.
+
+**A first run was invalid and was caught before reporting.** The new scripts initially defaulted to 400,000 sequences per trace; the committed LSTM results used 150,000 (`results/final/experiment_manifest.json`). The sequence cap decides how many samples exist and so where the chronological split falls, so the classical models were scored on about 60,000 test samples against 22,500 for everything else. That looked like a result but was not comparable. The defaults now match the manifest, `merge_with_existing()` raises if test-set sizes differ, and a test covers the guard.
+
+**A pooled correlation was misleading and was replaced.** Pooling all (policy, workload) points gave Spearman rho = -0.41 between F1 and WAF change, which reads as "better predictors place better". That figure mostly reflects which workload a point came from: `msr_rsrch_0` has both high F1 and large attainable WAF gains. Within each workload the sign reverses (rho +0.77 and +1.00 on the MSR workloads), so the figure reports per-workload values only.
+
+**Findings.** The fine-tuned LSTM remains the best predictor, XGBoost is close behind at about 1/50th of the training cost, and linear regression, the weakest predictor, gives the lowest mean WAF. The explanation offered for the last point (a more selective hot set) is a hypothesis and has not been tested.
+
+**Limits specific to this phase.** Single training seed, no significance testing, no hyperparameter search for the classical models (fixed defaults), three workloads, and a six-point sample per workload behind every correlation. Random-forest predictions are reproducible to about 1e-14 relative, not bit-for-bit, because multi-threaded tree averaging changes summation order.
+
+---
+
 ## Known Limitations
 
 * **Trace age.** MSR Cambridge 2007, SYSTOR '17 2016. SNIA files both as historical.

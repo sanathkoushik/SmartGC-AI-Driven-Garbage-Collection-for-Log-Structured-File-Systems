@@ -44,7 +44,7 @@ The comparison is:
 
 All values measured on real MSR Cambridge and SYSTOR '17 traces, on held-out
 chronological test splits. Regenerate with `python experiments/run_all.py`;
-`python experiments/audit.py` re-verifies every fairness property (71/71 pass).
+`python experiments/audit.py` re-verifies every fairness property (80/80 pass).
 
 ### Prediction: does the LSTM beat a heuristic? **Yes, decisively.**
 
@@ -118,6 +118,99 @@ than quietly corrected. `experiments/audit.py` now checks all three properties.
 
 Limitations (trace age, chronological truncation, one external workload, a single
 training seed, no significance testing) are in `docs/progress.md`.
+
+---
+
+## Classical ML vs. LSTM vs. Rule-Based
+
+Does a deep sequence model earn its place, or do classical ML models predict
+rewrite intervals just as well? Three classical models were added and evaluated
+on **exactly** the same held-out test samples, sequence length and training-derived
+hot/cold threshold as the LSTMs and baselines:
+
+* **Linear regression**, **random forest** (100 trees) and **XGBoost** (early-stopped
+  on the validation split, as the LSTM is), implemented in `ml/models/classical.py`.
+* Input is the same window of the last 20 rewrite intervals the LSTM sees, plus eight
+  summary features of it (mean, std, min, max, median, last, last-minus-first, mean of
+  the newest three), all in `log1p` space. Each model is trained on the target
+  workload's own training split only, so the like-for-like LSTM comparison is
+  *LSTM from scratch*; the pretrained and fine-tuned LSTMs additionally learn from
+  ten other MSR volumes, which the classical models do not.
+
+### Prediction quality (`results/final/full_model_comparison.csv`)
+
+MAE is on `log1p(interval)`, lower is better. F1 is hot/cold, higher is better.
+
+| Workload | Model | MAE log1p | F1 | ROC-AUC | Train time |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| `msr_rsrch_0` | LSTM from scratch | 1.0426 | 0.8697 | 0.979 | 530 s |
+| | LSTM pretrained + fine-tuned | **0.9507** | **0.8936** | 0.981 | 714 s |
+| | Linear regression | 1.5293 | 0.7405 | 0.972 | 0.1 s |
+| | Random forest | 1.0036 | 0.8615 | 0.982 | 18 s |
+| | XGBoost | 0.9649 | 0.8835 | 0.982 | 9 s |
+| `msr_src2_0` | LSTM from scratch | 1.0576 | 0.8435 | 0.981 | 487 s |
+| | LSTM pretrained + fine-tuned | **0.9735** | **0.8952** | 0.980 | 363 s |
+| | Linear regression | 1.7395 | 0.7148 | 0.968 | 0.1 s |
+| | Random forest | 1.0743 | 0.8594 | 0.984 | 18 s |
+| | XGBoost | 0.9971 | 0.8714 | 0.985 | 9 s |
+| `systor_lun0` | LSTM from scratch | 1.1170 | 0.7977 | 0.961 | 496 s |
+| | LSTM pretrained + fine-tuned | **1.1072** | **0.8023** | 0.960 | 1,650 s |
+| | Linear regression | 1.6322 | 0.6423 | 0.915 | 0.05 s |
+| | Random forest | 1.1846 | 0.7886 | 0.960 | 27 s |
+| | XGBoost | 1.1483 | 0.7997 | 0.962 | 11 s |
+
+* **The fine-tuned LSTM is the best predictor on every workload**, but XGBoost is
+  within 0.014-0.024 log-MAE on the MSR workloads and 0.003 F1 on `systor_lun0`.
+* **XGBoost beats the from-scratch LSTM** on both MSR workloads on log-MAE and F1,
+  and trains in about ten seconds instead of eight to nine minutes.
+* On raw MAE (microseconds, dominated by a few very long intervals) XGBoost is lower
+  than every LSTM on both MSR workloads; the LSTM is lower on `systor_lun0`.
+* Linear regression is clearly the weakest predictor.
+
+### Placement: write amplification (`results/final/waf_full_comparison.csv`)
+
+Same 1,000,000-write replay, geometry and seed as the table above; a MIXED control
+run reproduces the committed WAF exactly in all nine cases.
+
+| Policy | mean change in WAF vs MIXED | best | worst | cells won (of 9) |
+| :--- | ---: | ---: | ---: | ---: |
+| **Linear regression** | **-6.64%** | -13.44% | +0.02% | 6 |
+| LSTM pretrained | -5.02% | -13.12% | +0.07% | 0 |
+| LSTM scratch | -4.57% | -12.72% | -0.02% | 2 |
+| Random forest | -4.18% | -12.43% | -0.11% | 1 |
+| RULE_BASED | -4.10% | -12.83% | +0.15% | 0 |
+| XGBoost | -4.10% | -12.47% | +0.02% | 0 |
+| LSTM pretrained+finetuned | -3.53% | -12.07% | +0.12% | 0 |
+
+* **The weakest predictor places best.** Linear regression has the lowest F1 on every
+  workload and the lowest mean WAF. Within `msr_rsrch_0` and `msr_src2_0`, ranking the
+  six learned policies by F1 and by WAF change gives Spearman rho of +0.77 and +1.00:
+  *higher* F1 goes with *higher* (worse) WAF. With six points per workload this is
+  suggestive, not conclusive. Figure: `results/plots/19_prediction_vs_waf.png`.
+* A possible reason, **not tested here**: linear regression labels fewer writes HOT
+  (13.4% vs 17-18% on `msr_rsrch_0`), and a more selective hot set may suit placement
+  better than a more accurate one. Re-thresholding the stronger models would test it.
+* On `systor_lun0` every policy is within about 0.4 percentage points of the others
+  in any cell, so no ranking should be read from it.
+* Not tuned: no model was hyperparameter-searched beyond fixed, reasonable defaults.
+  Results use one training seed and no significance test, as for the LSTM results.
+
+**Which model is best depends on what is measured.** Fine-tuned LSTM for prediction
+accuracy; XGBoost for accuracy per unit of training cost; linear regression, by a
+small and unexplained margin, for write amplification.
+
+Figures: `results/plots/17_ml_prediction_comparison.png`,
+`18_ml_waf_comparison.png`, `19_prediction_vs_waf.png`. Reproduce with:
+
+```bash
+python experiments/ml_comparison.py --targets msr_rsrch_0 msr_src2_0 systor_lun0
+python experiments/simulate_classical.py --targets msr_rsrch_0 msr_src2_0 systor_lun0
+python experiments/plot_ml_comparison.py
+```
+
+Both scripts default to the sample and write caps recorded in
+`results/final/experiment_manifest.json`; changing them changes the test split and
+makes the comparison invalid, so the merge step refuses mismatched test sets.
 
 ---
 ## Core Concept: Hot/Cold vs. Valid/Invalid
@@ -269,7 +362,7 @@ SmartGC/
 │   └── tests/                # Unit test suite
 ├── ml/
 │   ├── preprocessing/        # Trace parsing, normalization, sequence building
-│   ├── models/               # PyTorch model definitions
+│   ├── models/               # PyTorch LSTM + classical ML (linear regression, random forest, XGBoost)
 │   ├── training/             # Pretraining & fine-tuning loops
 │   ├── inference/            # Prediction export
 │   └── evaluation/           # Regression & classification metrics

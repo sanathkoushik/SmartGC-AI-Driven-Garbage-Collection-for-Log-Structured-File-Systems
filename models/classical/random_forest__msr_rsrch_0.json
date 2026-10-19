@@ -1,0 +1,21 @@
+{
+  "best_iteration": null,
+  "environment": {
+    "git_commit": "4c1ba8578d88d0b5315bd6468c9a5b8721af1a7d-dirty",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+    "python_version": "3.11.9",
+    "torch_device": "cpu",
+    "torch_num_threads": 4,
+    "torch_version": "2.14.0+cpu"
+  },
+  "hot_threshold_microseconds": 80.0,
+  "hot_threshold_source": "target training split, p30",
+  "model_type": "random_forest",
+  "parameter_count": 245582,
+  "seed": 42,
+  "sequence_length": 20,
+  "trace_id": "msr_rsrch_0",
+  "train_samples": 105000,
+  "training_seconds": 17.875
+}
