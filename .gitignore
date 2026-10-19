@@ -55,6 +55,10 @@ data/predictions/*
 # reproducibility artefact, so they are tracked. Optimiser states are not.
 *.optim.pt
 models/**/*.tmp
+# Classical-ML models (random forests reach ~20 MB each) refit in about a minute
+# per workload: `python experiments/ml_comparison.py --targets ...`. Their small
+# .json sidecars (threshold, sequence length, timings) are tracked.
+models/classical/*.joblib
 
 # --------------------------------------------------------------------- results
 # results/ is tracked: metrics CSVs, dataset statistics, plots and the final

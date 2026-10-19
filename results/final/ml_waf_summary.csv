@@ -1,0 +1,8 @@
+policy,mean_change_pct,best_pct,worst_pct,cells_won
+Linear regression,-6.64,-13.444,0.017,6
+LSTM pretrained,-5.019,-13.12,0.067,0
+LSTM scratch,-4.574,-12.715,-0.023,2
+Random forest,-4.176,-12.429,-0.112,1
+Rule-based,-4.102,-12.831,0.145,0
+XGBoost,-4.098,-12.465,0.022,0
+LSTM fine-tuned,-3.533,-12.069,0.118,0
