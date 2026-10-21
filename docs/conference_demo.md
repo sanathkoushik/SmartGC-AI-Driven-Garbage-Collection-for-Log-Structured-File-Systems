@@ -21,6 +21,11 @@ pwsh scripts/conference_demo.ps1
 pwsh scripts/conference_demo.ps1 -Target msr_src2_0 -Utilization 85
 ```
 
+The fast demo also prints a "Classical ML models" section (linear regression, random
+forest, XGBoost) when `results/final/full_model_comparison.csv` and
+`waf_full_comparison.csv` exist, and says how to produce them when they do not. The
+live version below does not include the classical models.
+
 The live version re-runs all three placement policies in front of the audience,
 which is more convincing but takes about a minute and needs the trace present:
 
@@ -153,6 +158,7 @@ FIU absent. See Limitations below — say these before you are asked.
 | `18` WAF vs utilization | separation should matter more under pressure |
 | `19` change vs MIXED | the summary slide |
 | `20` prediction coverage | how many writes each policy could actually classify |
+| `21`-`23` classical ML (linear regression, random forest, XGBoost) vs the LSTMs | prediction quality, WAF, and whether better prediction means lower WAF; numbers in `results/final/full_model_comparison.csv` and `waf_full_comparison.csv` |
 
 ---
 

@@ -6,8 +6,9 @@
 Reads ``results/final/full_model_comparison.csv`` (prediction quality) and
 ``results/final/waf_full_comparison.csv`` (write amplification), both written by
 ``experiments/ml_comparison.py`` / ``experiments/simulate_classical.py``, and
-writes ``results/plots/17_ml_prediction_comparison.png``,
-``18_ml_waf_comparison.png`` and ``19_prediction_vs_waf.png``. Also writes the
+writes ``results/plots/21_ml_prediction_comparison.png``,
+``22_ml_waf_comparison.png`` and ``23_prediction_vs_waf.png`` (numbered after the
+original pipeline's 01-20 so nothing is shadowed). Also writes the
 summary tables ``results/final/ml_prediction_summary.csv`` and
 ``results/final/ml_waf_summary.csv`` that the README quotes.
 """
@@ -108,7 +109,7 @@ def plot_prediction(pred: pd.DataFrame) -> None:
     axes[1].set_ylabel("F1 on the held-out test split")
     axes[1].set_ylim(0, 1.05)
     axes[0].legend(ncol=2, loc="upper left")
-    save(fig, "17_ml_prediction_comparison.png")
+    save(fig, "21_ml_prediction_comparison.png")
 
 
 def plot_waf(waf: pd.DataFrame) -> None:
@@ -131,7 +132,7 @@ def plot_waf(waf: pd.DataFrame) -> None:
     axes[1].invert_yaxis()
     axes[1].set_title("Overall mean, all 9 workload x utilization cells")
     axes[1].set_xlabel("% change in WAF vs MIXED")
-    save(fig, "18_ml_waf_comparison.png")
+    save(fig, "22_ml_waf_comparison.png")
 
 
 def plot_prediction_vs_waf(pred: pd.DataFrame, waf: pd.DataFrame) -> dict[str, float]:
@@ -162,7 +163,7 @@ def plot_prediction_vs_waf(pred: pd.DataFrame, waf: pd.DataFrame) -> dict[str, f
     ax.set_title("Prediction quality vs placement quality")
     ax.legend(fontsize=7.5, loc="upper left", bbox_to_anchor=(1.02, 1.0),
               title="Spearman rho of F1 vs WAF change")
-    save(fig, "19_prediction_vs_waf.png")
+    save(fig, "23_prediction_vs_waf.png")
     return rho
 
 

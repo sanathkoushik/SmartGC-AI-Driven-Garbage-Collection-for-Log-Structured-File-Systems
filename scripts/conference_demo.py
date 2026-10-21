@@ -29,12 +29,14 @@ import pandas as pd                                                     # noqa: 
 
 from ml.config import load_config                                       # noqa: E402
 from ml.training.common import build_split_pool, load_checkpoint, normalized_trace_path  # noqa: E402
+from ml.models.classical import CLASSICAL_MODEL_TYPES                   # noqa: E402
 from ml.training.finetune import MODEL_TYPES, default_output_path       # noqa: E402
 from ml.evaluation.baselines import rule_threshold_from_training        # noqa: E402
 from experiments.run_all import distinct_written_lbas, find_simulator, size_device  # noqa: E402
 
 RESULTS_DIR = REPO_ROOT / "results"
 PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
+FULL_COMPARISON = REPO_ROOT / "results" / "final" / "full_model_comparison.csv"
 PLOTS_DIR = RESULTS_DIR / "plots"
 ROLES_PATH = RESULTS_DIR / "dataset_roles.json"
 MODEL_COMPARISON = RESULTS_DIR / "ml" / "model_comparison.csv"
@@ -218,6 +220,23 @@ def main(argv: Iterable[str] | None = None) -> int:
             reports_dir / f"LSTM_{name}.json")))
         print("done")
 
+    # Classical ML models (linear regression, random forest, XGBoost). Same
+    # simulator path as the LSTMs: only the prediction file differs. Skipped with a
+    # note if their predictions have not been generated for this trace.
+    for name in CLASSICAL_MODEL_TYPES:
+        predictions = PREDICTIONS_DIR / f"{name}__{trace_id}.csv"
+        label = f"ML ({name})"
+        if not predictions.is_file():
+            print(f"  {label:<30}... skipped (run experiments/simulate_classical.py "
+                  f"--targets {trace_id})")
+            continue
+        print(f"  {label:<30}... ", end="", flush=True)
+        runs.append((label, run_simulation(
+            simulator, base + ["--placement", "LSTM_SMARTGC", "--model-type", name,
+                               "--predictions", str(predictions)],
+            reports_dir / f"ML_{name}.json")))
+        print("done")
+
     # ---- results ----------------------------------------------------------
     section("MEASURED RESULTS")
     baseline = next(report for name, report in runs if name == "MIXED")
@@ -262,6 +281,13 @@ def main(argv: Iterable[str] | None = None) -> int:
                 print(f"  {row['predictor']:<26} {row['mae_us']:>14,.0f} "
                       f"{row['rmse_us']:>14,.0f} {row['mae_log1p']:>10.4f} "
                       f"{row['f1']:>8.4f} {row['accuracy']:>9.4f}")
+            if FULL_COMPARISON.is_file():
+                full = pd.read_csv(FULL_COMPARISON)
+                full = full[(full["target_trace"] == trace_id) & (full["family"] == "classical_ml")]
+                for _, row in full.iterrows():
+                    print(f"  {'ML: ' + row['model_type']:<26} {row['test_mae_us']:>14,.0f} "
+                          f"{row['test_rmse_us']:>14,.0f} {row['test_mae_log1p']:>10.4f} "
+                          f"{row['f1']:>8.4f} {row['accuracy']:>9.4f}")
 
     # ---- pointers ---------------------------------------------------------
     section("ARTEFACTS")

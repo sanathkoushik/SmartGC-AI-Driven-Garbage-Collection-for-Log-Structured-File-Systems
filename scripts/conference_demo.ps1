@@ -161,8 +161,86 @@ if (-not $runs) {
     }
 }
 
+# ---- Classical ML models --------------------------------------------------
+# Read from results/final/full_model_comparison.csv and waf_full_comparison.csv,
+# written by experiments/ml_comparison.py and experiments/simulate_classical.py.
+# Optional: if they have not been generated, say how and carry on.
+Write-Section "CLASSICAL ML MODELS - linear regression, random forest, XGBoost"
+$mlPredPath = Join-Path $repo "results/final/full_model_comparison.csv"
+$mlWafPath  = Join-Path $repo "results/final/waf_full_comparison.csv"
+if (-not ((Test-Path $mlPredPath) -and (Test-Path $mlWafPath))) {
+    Write-Host "  Not generated yet. Produce them with:"
+    Write-Host "    python experiments/ml_comparison.py --targets $Target"
+    Write-Host "    python experiments/simulate_classical.py --targets $Target"
+} else {
+    $mlNames = [ordered]@{
+        "linear_regression" = "Linear regression"
+        "random_forest"     = "Random forest"
+        "xgboost"           = "XGBoost"
+    }
+    $mlPred = Import-Csv $mlPredPath | Where-Object {
+        $_.target_trace -eq $Target -and $_.family -eq "classical_ml" }
+    if (-not $mlPred) {
+        Write-Host "  No classical-ML results for '$Target'."
+        Write-Host "    python experiments/ml_comparison.py --targets $Target"
+    } else {
+        Write-Host "  Same held-out test split and hot/cold threshold as the LSTM rows above."
+        Write-Host ""
+        $pfmt = "  {0,-40} {1,16} {2,10} {3,8} {4,12}"
+        Write-Host ($pfmt -f "Model", "MAE (us)", "MAE log1p", "F1", "Train (s)")
+        Write-Host ("  " + ("-" * 90))
+        foreach ($key in $mlNames.Keys) {
+            $row = $mlPred | Where-Object { $_.model_type -eq $key }
+            if ($row) {
+                Write-Host ($pfmt -f $mlNames[$key],
+                    ('{0:N0}' -f [double]$row.test_mae_us),
+                    ('{0:N4}' -f [double]$row.test_mae_log1p),
+                    ('{0:N4}' -f [double]$row.f1),
+                    ('{0:N1}' -f [double]$row.training_seconds))
+            }
+        }
+        if ($finetuned) {
+            Write-Host ($pfmt -f "(reference) LSTM pretrained + fine-tuned",
+                ('{0:N0}' -f [double]$finetuned.test_mae_us),
+                ('{0:N4}' -f [double]$finetuned.test_mae_log1p),
+                ('{0:N4}' -f [double]$finetuned.f1),
+                ('{0:N1}' -f [double]$finetuned.training_seconds))
+        }
+
+        $mlWaf = Import-Csv $mlWafPath | Where-Object {
+            $_.trace -eq $Target -and
+            [math]::Round([double]$_.target_utilization * 100) -eq [math]::Round($Utilization) }
+        Write-Host ""
+        Write-Host "  Write amplification at $Utilization% utilization:"
+        $wfmt = "  {0,-30} {1,8} {2,10} {3,14} {4,10}"
+        Write-Host ($wfmt -f "Policy", "WAF", "vs MIXED", "Migrations", "GC count")
+        Write-Host ("  " + ("-" * 76))
+        $mixedRow = $mlWaf | Where-Object { $_.configuration -eq "MIXED" } | Select-Object -First 1
+        if ($mixedRow) {
+            Write-Host ($wfmt -f "MIXED", ('{0:N4}' -f [double]$mixedRow.waf), "baseline",
+                ('{0:N0}' -f [double]$mixedRow.valid_blocks_migrated),
+                ('{0:N0}' -f [double]$mixedRow.gc_count))
+        }
+        foreach ($key in $mlNames.Keys) {
+            $row = $mlWaf | Where-Object { $_.configuration -eq $key } | Select-Object -First 1
+            if ($row) {
+                Write-Host ($wfmt -f $mlNames[$key], ('{0:N4}' -f [double]$row.waf),
+                    ('{0:+0.00;-0.00}%' -f [double]$row.waf_change_vs_mixed_pct),
+                    ('{0:N0}' -f [double]$row.valid_blocks_migrated),
+                    ('{0:N0}' -f [double]$row.gc_count))
+            }
+        }
+        Write-Host ""
+        Write-Host "  Compare the F1 column above with the vs-MIXED column here: does the better"
+        Write-Host "  predictor also place better?"
+    }
+}
+
 Write-Section "FIGURES"
 $plots = @(
+    @{ File = "results/plots/21_ml_prediction_comparison.png"; What = "Classical ML vs LSTM: prediction" },
+    @{ File = "results/plots/22_ml_waf_comparison.png";         What = "Classical ML vs LSTM: WAF" },
+    @{ File = "results/plots/23_prediction_vs_waf.png";         What = "Prediction quality vs WAF" },
     @{ File = "results/plots/final_waf_comparison.png";       What = "WAF by placement policy" },
     @{ File = "results/plots/final_gc_migrations.png";        What = "Valid-block migrations" },
     @{ File = "results/plots/final_prediction_comparison.png"; What = "Prediction error vs baselines" },
