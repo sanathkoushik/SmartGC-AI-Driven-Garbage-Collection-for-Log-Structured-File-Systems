@@ -186,7 +186,7 @@ run reproduces the committed WAF exactly in all nine cases.
   workload and the lowest mean WAF. Within `msr_rsrch_0` and `msr_src2_0`, ranking the
   six learned policies by F1 and by WAF change gives Spearman rho of +0.77 and +1.00:
   *higher* F1 goes with *higher* (worse) WAF. With six points per workload this is
-  suggestive, not conclusive. Figure: `results/plots/19_prediction_vs_waf.png`.
+  suggestive, not conclusive. Figure: `results/plots/23_prediction_vs_waf.png`.
 * A possible reason, **not tested here**: linear regression labels fewer writes HOT
   (13.4% vs 17-18% on `msr_rsrch_0`), and a more selective hot set may suit placement
   better than a more accurate one. Re-thresholding the stronger models would test it.
@@ -199,8 +199,9 @@ run reproduces the committed WAF exactly in all nine cases.
 accuracy; XGBoost for accuracy per unit of training cost; linear regression, by a
 small and unexplained margin, for write amplification.
 
-Figures: `results/plots/17_ml_prediction_comparison.png`,
-`18_ml_waf_comparison.png`, `19_prediction_vs_waf.png`. Reproduce with:
+Figures: `results/plots/21_ml_prediction_comparison.png`,
+`22_ml_waf_comparison.png`, `23_prediction_vs_waf.png`. The fast demo
+(`scripts/conference_demo.ps1`) prints these results too. Reproduce with:
 
 ```bash
 python experiments/ml_comparison.py --targets msr_rsrch_0 msr_src2_0 systor_lun0
